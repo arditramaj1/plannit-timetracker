@@ -89,21 +89,8 @@ default_db = (
 
 database_url = env("DATABASE_URL", default_db)
 
-def mask_db_url(url: str) -> str:
-    parts = urlsplit(url)
-    if "@" in parts.netloc:
-        auth, host = parts.netloc.rsplit("@", 1)
-        if ":" in auth:
-            user, _password = auth.split(":", 1)
-            netloc = f"{user}:****@{host}"
-        else:
-            netloc = parts.netloc
-    else:
-        netloc = parts.netloc
-    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
-
-print("DEBUG default_db =", mask_db_url(default_db))
-print("DEBUG DATABASE_URL =", mask_db_url(database_url))
+print("DEBUG default_db =", default_db))
+print("DEBUG DATABASE_URL =", database_url)
 
 DATABASES = {
     "default": dj_database_url.parse(
@@ -117,7 +104,7 @@ print("DEBUG parsed DATABASES['default'] =", {
     "ENGINE": DATABASES["default"].get("ENGINE"),
     "NAME": DATABASES["default"].get("NAME"),
     "USER": DATABASES["default"].get("USER"),
-    "PASSWORD": "****" if DATABASES["default"].get("PASSWORD") else None,
+    "PASSWORD": DATABASES["default"].get("PASSWORD"),
     "HOST": DATABASES["default"].get("HOST"),
     "PORT": DATABASES["default"].get("PORT"),
 })
