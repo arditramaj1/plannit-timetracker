@@ -1,0 +1,53 @@
+{
+  "name": "Plannit Time Tracker",
+  "build": {
+    "dockerfile": "Dockerfile.dev",
+    "context": ".."
+  },
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
+  "workspaceFolder": "/workspace",
+  "remoteUser": "ubuntu",
+  "forwardPorts": [
+    3000,
+    8000,
+    5432
+  ],
+  "initializeCommand": "bash .devcontainer/hooks/initialize.sh",
+  "postStartCommand": "bash .devcontainer/hooks/post-start.sh",
+  "postCreateCommand": "bash .devcontainer/hooks/post-create.sh",
+  "mounts": [
+    "source=${localEnv:HOME}/.codex,target=/home/ubuntu/.codex,type=bind,consistency=delegated",
+    "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind"
+  ],
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "python.defaultInterpreterPath": "/workspace/backend/.venv/bin/python",
+        "python.analysis.autoImportCompletions": true,
+        "editor.formatOnSave": true,
+        "files.trimTrailingWhitespace": true,
+        "terminal.integrated.defaultProfile.linux": "bash"
+      },
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "batisteo.vscode-django",
+        "ms-python.debugpy",
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "bradlc.vscode-tailwindcss",
+        "ms-azuretools.vscode-docker",
+        "eamodio.gitlens",
+        "timonwong.shellcheck",
+        "openai.chatgpt"
+      ]
+    }
+  },
+  "runArgs": [
+    "--add-host=host.docker.internal:host-gateway"
+  ],
+  "containerEnv": {
+    "POSTGRES_HOST": "127.0.0.1",
+    "POSTGRES_PORT": "5432"
+  }
+}

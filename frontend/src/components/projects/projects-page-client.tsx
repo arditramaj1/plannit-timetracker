@@ -166,8 +166,12 @@ export function ProjectsPageClient() {
         project={activeProject}
         isSaving={saveMutation.isPending}
         isDeleting={deleteMutation.isPending}
-        onSave={async (payload) => saveMutation.mutateAsync(payload)}
-        onDelete={async () => deleteMutation.mutateAsync()}
+        onSave={async (payload) => {
+          await saveMutation.mutateAsync(payload);
+        }}
+        onDelete={async () => {
+          await deleteMutation.mutateAsync();
+        }}
       />
     </div>
   );

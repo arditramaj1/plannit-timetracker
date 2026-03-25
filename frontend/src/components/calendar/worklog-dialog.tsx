@@ -22,9 +22,10 @@ type WorklogDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   day: Date | null;
-  hourSlot: number | null;
+  hourSlots: number[];
   entry?: WorkLogEntry | null;
   projects: Project[];
+  userLabel?: string | null;
   isSaving: boolean;
   isDeleting: boolean;
   onSave: (payload: { project: number; notes: string }) => Promise<void>;
@@ -35,9 +36,10 @@ export function WorklogDialog({
   open,
   onOpenChange,
   day,
-  hourSlot,
+  hourSlots,
   entry,
   projects,
+  userLabel,
   isSaving,
   isDeleting,
   onSave,
@@ -45,10 +47,11 @@ export function WorklogDialog({
 }: WorklogDialogProps) {
   const [project, setProject] = useState("");
   const [notes, setNotes] = useState("");
+  const sortedHourSlots = useMemo(() => [...hourSlots].sort((left, right) => left - right), [hourSlots]);
   const projectOptions = useMemo(
     () =>
       entry && !projects.some((item) => item.id === entry.project)
-        ? [{ id: entry.project, name: `${entry.project_name} (archived)` } as Project, ...projects]
+        ? ([{ id: entry.project, name: `${entry.project_name} (archived)` } as Project, ...projects] satisfies Project[])
         : projects,
     [entry, projects],
   );
@@ -70,20 +73,48 @@ export function WorklogDialog({
   }
 
   const isEditing = Boolean(entry);
-  const formattedSlot =
-    day && hourSlot !== null ? `${format(day, "EEEE, MMM d")} at ${hourSlot.toString().padStart(2, "0")}:00` : "";
+  const slotCount = sortedHourSlots.length;
+  const formattedSlot = useMemo(() => {
+    if (!day || slotCount === 0) {
+      return "";
+    }
+    const startHour = sortedHourSlots[0];
+    if (slotCount === 1) {
+      return `${format(day, "EEEE, MMM d")} at ${startHour.toString().padStart(2, "0")}:00`;
+    }
+    const endHour = sortedHourSlots[slotCount - 1] + 1;
+    return `${format(day, "EEEE, MMM d")} from ${startHour.toString().padStart(2, "0")}:00 to ${endHour.toString().padStart(2, "0")}:00`;
+  }, [day, slotCount, sortedHourSlots]);
+
+  const selectionHint = !isEditing && slotCount > 1
+    ? `This will create ${slotCount} one-hour work logs with the same project and notes.`
+    : null;
+  const dialogTitle = isEditing ? "Edit work log" : slotCount > 1 ? "Add work logs" : "Add work log";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{isEditing ? "Edit work log" : "Add work log"}</DialogTitle>
+          <DialogTitle>{dialogTitle}</DialogTitle>
           <DialogDescription>
             {formattedSlot || "Select a calendar slot to create a work log entry."}
           </DialogDescription>
         </DialogHeader>
 
         <form className="space-y-4" onSubmit={handleSubmit}>
+          {userLabel ? (
+            <div className="rounded-2xl bg-secondary px-4 py-3 text-sm text-secondary-foreground">
+              Saving {slotCount > 1 && !isEditing ? "these work logs" : "this work log"} for{" "}
+              <span className="font-semibold text-slate-950">{userLabel}</span>.
+            </div>
+          ) : null}
+
+          {selectionHint ? (
+            <div className="rounded-2xl border border-border/80 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
+              {selectionHint}
+            </div>
+          ) : null}
+
           <div className="space-y-2">
             <Label htmlFor="project">Project</Label>
             <Select value={project} onValueChange={setProject}>
@@ -106,7 +137,7 @@ export function WorklogDialog({
               id="notes"
               value={notes}
               onChange={(event) => setNotes(event.target.value)}
-              placeholder="What did you work on during this hour?"
+              placeholder="What did you work on during this time block?"
             />
           </div>
 

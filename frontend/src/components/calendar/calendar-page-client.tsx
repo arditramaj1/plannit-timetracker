@@ -3,34 +3,91 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { addWeeks, format, subWeeks } from "date-fns";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
+import { useAuth } from "@/hooks/use-auth";
 import { formatApiDate, getWeekDates, getWeekRangeLabel, getWeekStart, safeParseDate } from "@/lib/date";
-import { Project, WorkLogEntry } from "@/lib/types";
+import { Project, User as AppUser, WorkLogEntry } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PageHeader } from "@/components/layout/page-header";
 import { WorklogDialog } from "@/components/calendar/worklog-dialog";
 import { WeeklyCalendar } from "@/components/calendar/weekly-calendar";
 import { listProjects } from "@/services/projects";
-import { createWorkLog, deleteWorkLog, listWorkLogs, updateWorkLog } from "@/services/worklogs";
+import { listUsers } from "@/services/users";
+import { createWorkLog, createWorkLogRange, deleteWorkLog, listWorkLogs, updateWorkLog } from "@/services/worklogs";
 
 type DialogState = {
   day: Date;
-  hourSlot: number;
+  hourSlots: number[];
   entry?: WorkLogEntry | null;
 };
 
+function getDefaultSelectedUserId(users: AppUser[], currentUserId?: number) {
+  const firstOtherUser = users.find((candidate) => candidate.id !== currentUserId);
+  return firstOtherUser?.id ?? null;
+}
+
+function buildHourSlots(startHour: number, endHour: number) {
+  const firstHour = Math.min(startHour, endHour);
+  const lastHour = Math.max(startHour, endHour);
+  return Array.from({ length: lastHour - firstHour + 1 }, (_, index) => firstHour + index);
+}
+
 export function CalendarPageClient() {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const [anchorDate, setAnchorDate] = useState(() => new Date());
   const [dialogState, setDialogState] = useState<DialogState | null>(null);
+  const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
 
   const weekDates = useMemo(() => getWeekDates(anchorDate), [anchorDate]);
   const weekStart = weekDates[0];
   const weekEnd = weekDates[6];
+
+  const usersQuery = useQuery({
+    queryKey: ["users"],
+    queryFn: listUsers,
+    enabled: isAdmin,
+  });
+
+  const selectableUsers = useMemo(() => {
+    const users = usersQuery.data ?? [];
+    return isAdmin ? users.filter((candidate) => candidate.id !== user?.id) : [];
+  }, [isAdmin, user?.id, usersQuery.data]);
+
+  useEffect(() => {
+    if (!isAdmin) {
+      setSelectedUserId(null);
+      return;
+    }
+
+    if (selectableUsers.length === 0) {
+      setSelectedUserId(null);
+      return;
+    }
+
+    setSelectedUserId((current) => {
+      if (current && selectableUsers.some((candidate) => candidate.id === current)) {
+        return current;
+      }
+      return getDefaultSelectedUserId(selectableUsers, user?.id);
+    });
+  }, [isAdmin, selectableUsers, user?.id]);
+
+  useEffect(() => {
+    if (isAdmin) {
+      setDialogState(null);
+    }
+  }, [isAdmin, selectedUserId]);
+
+  const selectedUser = isAdmin
+    ? selectableUsers.find((candidate) => candidate.id === selectedUserId) ?? null
+    : user;
 
   const projectsQuery = useQuery({
     queryKey: ["projects"],
@@ -38,11 +95,13 @@ export function CalendarPageClient() {
   });
 
   const worklogsQuery = useQuery({
-    queryKey: ["worklogs", formatApiDate(weekStart), formatApiDate(weekEnd)],
+    queryKey: ["worklogs", formatApiDate(weekStart), formatApiDate(weekEnd), isAdmin ? selectedUserId ?? "none" : "self"],
+    enabled: !isAdmin || Boolean(selectedUserId),
     queryFn: () =>
       listWorkLogs({
         date_from: formatApiDate(weekStart),
         date_to: formatApiDate(weekEnd),
+        ...(isAdmin && selectedUserId ? { user: selectedUserId } : {}),
       }),
   });
 
@@ -51,21 +110,49 @@ export function CalendarPageClient() {
       if (!dialogState) {
         throw new Error("No calendar slot selected.");
       }
+
       if (dialogState.entry) {
         return updateWorkLog(dialogState.entry.id, {
           notes: payload.notes,
           ...(payload.project !== dialogState.entry.project ? { project: payload.project } : {}),
         });
       }
+
+      const workDate = formatApiDate(dialogState.day);
+      if (dialogState.hourSlots.length > 1) {
+        return createWorkLogRange({
+          ...(isAdmin && selectedUserId ? { user: selectedUserId } : {}),
+          project: payload.project,
+          notes: payload.notes,
+          work_date: workDate,
+          hour_slots: dialogState.hourSlots,
+        });
+      }
+
+      const [hourSlot] = dialogState.hourSlots;
+      if (isAdmin) {
+        if (!selectedUserId) {
+          throw new Error("Choose a user before saving a work log.");
+        }
+        return createWorkLog({
+          user: selectedUserId,
+          project: payload.project,
+          notes: payload.notes,
+          work_date: workDate,
+          hour_slot: hourSlot,
+        });
+      }
+
       return createWorkLog({
         project: payload.project,
         notes: payload.notes,
-        work_date: formatApiDate(dialogState.day),
-        hour_slot: dialogState.hourSlot,
+        work_date: workDate,
+        hour_slot: hourSlot,
       });
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["worklogs"] });
+      await queryClient.invalidateQueries({ queryKey: ["reports"] });
       toast.success("Work log saved.");
       setDialogState(null);
     },
@@ -83,6 +170,7 @@ export function CalendarPageClient() {
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["worklogs"] });
+      await queryClient.invalidateQueries({ queryKey: ["reports"] });
       toast.success("Work log deleted.");
       setDialogState(null);
     },
@@ -91,29 +179,72 @@ export function CalendarPageClient() {
     },
   });
 
-  function openNewEntry(day: Date, hourSlot: number) {
-    setDialogState({ day, hourSlot });
+  const activeProjects = (projectsQuery.data ?? []).filter((project) => project.is_active);
+  const worklogs = worklogsQuery.data ?? [];
+  const canCreateEntries = activeProjects.length > 0 && (!isAdmin || Boolean(selectedUser));
+
+  function openRangeSelection(day: Date, startHour: number, endHour: number) {
+    const hourSlots = buildHourSlots(startHour, endHour);
+    const workDate = formatApiDate(day);
+    const occupiedHours = worklogs
+      .filter((entry) => entry.work_date === workDate && hourSlots.includes(entry.hour_slot))
+      .map((entry) => entry.hour_slot)
+      .sort((left, right) => left - right);
+
+    if (occupiedHours.length > 0) {
+      const formattedHours = occupiedHours.map((hour) => `${hour.toString().padStart(2, "0")}:00`).join(", ");
+      toast.error(`Some selected hours already have work logs: ${formattedHours}.`);
+      return;
+    }
+
+    setDialogState({ day, hourSlots });
   }
 
   function openExistingEntry(entry: WorkLogEntry) {
     setDialogState({
       day: safeParseDate(entry.work_date),
-      hourSlot: entry.hour_slot,
+      hourSlots: [entry.hour_slot],
       entry,
     });
   }
 
-  const activeProjects = (projectsQuery.data ?? []).filter((project) => project.is_active);
-  const worklogs = worklogsQuery.data ?? [];
+  const calendarDescription = isAdmin
+    ? selectedUser
+      ? "Select a teammate, then click or drag down across empty hours to add a shared note and project for the whole block."
+      : "Choose a teammate to view and manage their weekly calendar."
+    : "Click a slot or drag down across empty hours to add one project and note across a longer time block.";
+  const hoursSummary = selectedUser
+    ? `${selectedUser.display_name}: ${worklogs.length} logged ${worklogs.length === 1 ? "hour" : "hours"}`
+    : `${worklogs.length} logged ${worklogs.length === 1 ? "hour" : "hours"}`;
+  const isLoading = projectsQuery.isLoading || worklogsQuery.isLoading || (isAdmin && usersQuery.isLoading);
+  const hasError = projectsQuery.isError || worklogsQuery.isError || (isAdmin && usersQuery.isError);
 
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Weekly Tracking"
+        eyebrow={isAdmin ? "Administration" : "Weekly Tracking"}
         title="Calendar"
-        description="Click any hourly slot to log what you worked on. Existing entries stay easy to scan and edit."
+        description={calendarDescription}
         actions={
           <>
+            {isAdmin ? (
+              <Select
+                value={selectedUserId ? String(selectedUserId) : undefined}
+                onValueChange={(value) => setSelectedUserId(Number(value))}
+                disabled={usersQuery.isLoading || selectableUsers.length === 0}
+              >
+                <SelectTrigger className="w-[240px] bg-white">
+                  <SelectValue placeholder={usersQuery.isLoading ? "Loading users..." : "Select a user"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {selectableUsers.map((item) => (
+                    <SelectItem key={item.id} value={String(item.id)}>
+                      {item.display_name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : null}
             <Button variant="outline" onClick={() => setAnchorDate(getWeekStart(new Date()))}>
               Today
             </Button>
@@ -135,34 +266,59 @@ export function CalendarPageClient() {
               <p className="text-sm text-muted-foreground">
                 Week of {format(weekStart, "MMMM d, yyyy")} to {format(weekEnd, "MMMM d, yyyy")}
               </p>
+              {isAdmin && selectedUser ? (
+                <p className="mt-2 text-sm text-slate-700">Viewing {selectedUser.display_name}&apos;s calendar</p>
+              ) : null}
             </div>
-            <div className="rounded-full bg-secondary px-4 py-2 text-sm text-secondary-foreground">
-              {worklogs.length} logged {worklogs.length === 1 ? "hour" : "hours"} this week
-            </div>
+            <div className="rounded-full bg-secondary px-4 py-2 text-sm text-secondary-foreground">{hoursSummary}</div>
           </div>
 
-          {projectsQuery.isLoading || worklogsQuery.isLoading ? (
+          {isLoading ? (
             <div className="space-y-3">
               <Skeleton className="h-12 w-full rounded-2xl" />
               <Skeleton className="h-[920px] w-full rounded-3xl" />
             </div>
-          ) : projectsQuery.isError || worklogsQuery.isError ? (
+          ) : hasError ? (
             <div className="rounded-2xl border border-destructive/20 bg-destructive/5 p-6 text-sm text-destructive">
-              {projectsQuery.error instanceof Error
-                ? projectsQuery.error.message
-                : worklogsQuery.error instanceof Error
-                  ? worklogsQuery.error.message
-                  : "The calendar could not be loaded."}
+              {isAdmin && usersQuery.error instanceof Error
+                ? usersQuery.error.message
+                : projectsQuery.error instanceof Error
+                  ? projectsQuery.error.message
+                  : worklogsQuery.error instanceof Error
+                    ? worklogsQuery.error.message
+                    : "The calendar could not be loaded."}
             </div>
-          ) : activeProjects.length === 0 ? (
+          ) : isAdmin && selectableUsers.length === 0 ? (
+            <div className="rounded-3xl border border-dashed border-border/80 bg-muted/20 p-10 text-center">
+              <h3 className="text-lg font-semibold text-slate-950">No other users available yet</h3>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Create or activate another account before managing work logs from the calendar.
+              </p>
+            </div>
+          ) : isAdmin && !selectedUser ? (
+            <div className="rounded-3xl border border-dashed border-border/80 bg-muted/20 p-10 text-center">
+              <h3 className="text-lg font-semibold text-slate-950">Select a user to continue</h3>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Choose a teammate from the selector above to view or edit their week.
+              </p>
+            </div>
+          ) : activeProjects.length === 0 && worklogs.length === 0 ? (
             <div className="rounded-3xl border border-dashed border-border/80 bg-muted/20 p-10 text-center">
               <h3 className="text-lg font-semibold text-slate-950">No active projects yet</h3>
               <p className="mt-2 text-sm text-muted-foreground">
-                Ask an admin to create or reactivate a project before logging time.
+                {isAdmin
+                  ? "Create or reactivate a project before adding team work logs here."
+                  : "Ask an admin to create or reactivate a project before logging time."}
               </p>
             </div>
           ) : (
-            <WeeklyCalendar weekDates={weekDates} entries={worklogs} onSlotClick={openNewEntry} onEntryClick={openExistingEntry} />
+            <WeeklyCalendar
+              weekDates={weekDates}
+              entries={worklogs}
+              onRangeSelect={openRangeSelection}
+              onEntryClick={openExistingEntry}
+              allowCreate={canCreateEntries}
+            />
           )}
         </CardContent>
       </Card>
@@ -175,13 +331,18 @@ export function CalendarPageClient() {
           }
         }}
         day={dialogState?.day ?? null}
-        hourSlot={dialogState?.hourSlot ?? null}
+        hourSlots={dialogState?.hourSlots ?? []}
         entry={dialogState?.entry ?? null}
         projects={activeProjects as Project[]}
+        userLabel={isAdmin ? selectedUser?.display_name ?? null : null}
         isSaving={saveMutation.isPending}
         isDeleting={deleteMutation.isPending}
-        onSave={async (payload) => saveMutation.mutateAsync(payload)}
-        onDelete={async () => deleteMutation.mutateAsync()}
+        onSave={async (payload) => {
+          await saveMutation.mutateAsync(payload);
+        }}
+        onDelete={async () => {
+          await deleteMutation.mutateAsync();
+        }}
       />
     </div>
   );
