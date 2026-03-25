@@ -5,6 +5,8 @@ from datetime import timedelta
 from pathlib import Path
 
 import dj_database_url
+from urllib.parse import urlsplit, urlunsplit
+
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 
@@ -84,13 +86,41 @@ default_db = (
     f"postgresql://{env('POSTGRES_USER')}:{env('POSTGRES_PASSWORD')}"
     f"@{env('POSTGRES_HOST')}:{env('POSTGRES_PORT')}/{env('POSTGRES_DB')}"
 )
+
+database_url = env("DATABASE_URL", default_db)
+
+def mask_db_url(url: str) -> str:
+    parts = urlsplit(url)
+    if "@" in parts.netloc:
+        auth, host = parts.netloc.rsplit("@", 1)
+        if ":" in auth:
+            user, _password = auth.split(":", 1)
+            netloc = f"{user}:****@{host}"
+        else:
+            netloc = parts.netloc
+    else:
+        netloc = parts.netloc
+    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+
+print("DEBUG default_db =", mask_db_url(default_db))
+print("DEBUG DATABASE_URL =", mask_db_url(database_url))
+
 DATABASES = {
     "default": dj_database_url.parse(
-        env("DATABASE_URL", default_db),
+        database_url,
         conn_max_age=600,
         conn_health_checks=True,
     )
 }
+
+print("DEBUG parsed DATABASES['default'] =", {
+    "ENGINE": DATABASES["default"].get("ENGINE"),
+    "NAME": DATABASES["default"].get("NAME"),
+    "USER": DATABASES["default"].get("USER"),
+    "PASSWORD": "****" if DATABASES["default"].get("PASSWORD") else None,
+    "HOST": DATABASES["default"].get("HOST"),
+    "PORT": DATABASES["default"].get("PORT"),
+})
 
 AUTH_PASSWORD_VALIDATORS = [
     {
