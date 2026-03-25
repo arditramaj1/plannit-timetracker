@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-host="${POSTGRES_HOST:-db}"
-port="${POSTGRES_PORT:-5432}"
+host="${POSTGRES_HOST}"
+port="${POSTGRES_PORT}"
 
 until nc -z "$host" "$port"; do
   echo "Waiting for PostgreSQL at ${host}:${port}..."

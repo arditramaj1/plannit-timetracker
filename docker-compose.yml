@@ -6,10 +6,12 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    expose:
+      - "5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
-      - app-network
+      - internal-bridge
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
@@ -40,6 +42,8 @@ services:
       DJANGO_SUPERUSER_PASSWORD: ${DJANGO_SUPERUSER_PASSWORD}
       GUNICORN_WORKERS: ${GUNICORN_WORKERS}
       GUNICORN_TIMEOUT: ${GUNICORN_TIMEOUT}
+    expose:
+      - "8000"
     volumes:
       - backend_static:/app/staticfiles
       - backend_media:/app/media
@@ -47,7 +51,7 @@ services:
       db:
         condition: service_healthy
     networks:
-      - app-network
+      - internal-bridge
 
   frontend:
     build:
@@ -63,8 +67,10 @@ services:
       NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL}
       NEXT_PUBLIC_DEFAULT_WEEK_START: ${NEXT_PUBLIC_DEFAULT_WEEK_START}
       NODE_ENV: production
+    expose:
+      - "3000"
     networks:
-      - app-network
+      - internal-bridge
       - dokploy-network
 
 volumes:
@@ -73,7 +79,7 @@ volumes:
   backend_media:
 
 networks:
-  app-network:
+  internal-bridge:
     driver: bridge
   dokploy-network:
     external: true
