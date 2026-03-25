@@ -52,6 +52,7 @@ services:
         condition: service_healthy
     networks:
       - internal-bridge
+      - dokploy-network
 
   frontend:
     build:
@@ -70,7 +71,6 @@ services:
     expose:
       - "3000"
     networks:
-      - internal-bridge
       - dokploy-network
 
 volumes:
