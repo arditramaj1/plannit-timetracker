@@ -81,8 +81,8 @@ WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
 
 default_db = (
-    f"postgresql://{env('POSTGRES_USER', 'plannit')}:{env('POSTGRES_PASSWORD', 'plannit')}"
-    f"@{env('POSTGRES_HOST', '127.0.0.1')}:{env('POSTGRES_PORT', '5432')}/{env('POSTGRES_DB', 'plannit')}"
+    f"postgresql://{env('POSTGRES_USER')}:{env('POSTGRES_PASSWORD')}"
+    f"@{env('POSTGRES_HOST')}:{env('POSTGRES_PORT')}/{env('POSTGRES_DB')}"
 )
 DATABASES = {
     "default": dj_database_url.parse(
