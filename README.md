@@ -48,7 +48,8 @@ Key architectural choices:
 │   ├── dev-down.sh
 │   └── dev-up.sh
 ├── .env.example
-└── docker-compose.yml
+├── docker-compose.yml
+└── docker-compose.dev.yml
 ```
 
 ## Core Implementation
@@ -193,7 +194,7 @@ bash scripts/dev-up.sh
 If you prefer to run it directly:
 
 ```bash
-docker compose up -d db
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d db
 ```
 
 Run Django migrations locally to create/update the tables in that PostgreSQL container:
