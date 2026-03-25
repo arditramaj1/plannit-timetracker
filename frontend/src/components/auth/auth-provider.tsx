@@ -67,8 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const payload = await loginRequest(username, password);
       setStoredAuth(payload);
       setUser(payload.user);
-      router.push("/calendar");
-      router.refresh();
+      router.replace("/calendar");
       return payload.user;
     } finally {
       setIsLoading(false);
@@ -78,8 +77,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   function logout() {
     logoutRequest();
     setUser(null);
-    router.push("/login");
-    router.refresh();
+    router.replace("/login");
   }
 
   return (

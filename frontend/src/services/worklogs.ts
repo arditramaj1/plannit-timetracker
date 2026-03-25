@@ -6,6 +6,7 @@ export type WorkLogPayload = {
   project: number;
   work_date: string;
   hour_slot: number;
+  duration_minutes?: number;
   notes: string;
 };
 
@@ -37,7 +38,7 @@ export function createWorkLog(payload: WorkLogPayload) {
 }
 
 export function createWorkLogRange(payload: WorkLogRangePayload) {
-  return apiRequest<WorkLogEntry[]>("worklogs/bulk-create/", {
+  return apiRequest<WorkLogEntry>("worklogs/bulk-create/", {
     method: "POST",
     body: JSON.stringify(payload),
   });

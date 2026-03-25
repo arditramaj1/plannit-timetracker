@@ -19,6 +19,19 @@ import { listProjects } from "@/services/projects";
 import { exportReportCsv, getReport } from "@/services/reports";
 import { listUsers } from "@/services/users";
 
+function formatHourValue(hours: number) {
+  return Number.isInteger(hours) ? String(hours) : hours.toFixed(2);
+}
+
+function formatTimeLabel(hour: number) {
+  return `${hour.toString().padStart(2, "0")}:00`;
+}
+
+function formatTimeRange(hourSlot: number, durationMinutes: number) {
+  const endHour = hourSlot + Math.max(1, durationMinutes / 60);
+  return `${formatTimeLabel(hourSlot)} - ${formatTimeLabel(endHour)}`;
+}
+
 export function ReportsPageClient() {
   const { user } = useAuth();
   const today = formatApiDate(new Date());
@@ -202,7 +215,7 @@ export function ReportsPageClient() {
       </Card>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard title="Total Hours" value={String(report?.summary.total_hours ?? 0)} />
+        <SummaryCard title="Total Hours" value={formatHourValue(report?.summary.total_hours ?? 0)} />
         <SummaryCard title="Entries" value={String(report?.summary.total_entries ?? 0)} />
         <SummaryCard title="Users" value={String(report?.summary.unique_users ?? 0)} />
         <SummaryCard title="Projects" value={String(report?.summary.unique_projects ?? 0)} />
@@ -228,7 +241,7 @@ export function ReportsPageClient() {
                       <TableCell>
                         {[row.user__first_name, row.user__last_name].filter(Boolean).join(" ") || String(row.user__username)}
                       </TableCell>
-                      <TableCell>{row.total_hours}</TableCell>
+                      <TableCell>{formatHourValue(Number(row.total_hours ?? 0))}</TableCell>
                     </TableRow>
                   ))
                 ) : (
@@ -260,7 +273,7 @@ export function ReportsPageClient() {
                   report?.summary.by_project.map((row) => (
                     <TableRow key={String(row.project_id)}>
                       <TableCell>{String(row.project__name)}</TableCell>
-                      <TableCell>{row.total_hours}</TableCell>
+                      <TableCell>{formatHourValue(Number(row.total_hours ?? 0))}</TableCell>
                     </TableRow>
                   ))
                 ) : (
@@ -287,7 +300,8 @@ export function ReportsPageClient() {
                 <TableHead>User</TableHead>
                 <TableHead>Project</TableHead>
                 <TableHead>Date</TableHead>
-                <TableHead>Hour</TableHead>
+                <TableHead>Time Range</TableHead>
+                <TableHead>Duration</TableHead>
                 <TableHead>Notes</TableHead>
               </TableRow>
             </TableHeader>
@@ -298,7 +312,8 @@ export function ReportsPageClient() {
                     <TableCell>{row.user.display_name}</TableCell>
                     <TableCell>{row.project.name}</TableCell>
                     <TableCell>{row.work_date}</TableCell>
-                    <TableCell>{row.hour_slot.toString().padStart(2, "0")}:00</TableCell>
+                    <TableCell>{formatTimeRange(row.hour_slot, row.duration_minutes)}</TableCell>
+                    <TableCell>{formatHourValue(row.duration_minutes / 60)}h</TableCell>
                     <TableCell className="max-w-[420px] truncate text-muted-foreground">
                       {row.notes || "No notes"}
                     </TableCell>
@@ -306,7 +321,7 @@ export function ReportsPageClient() {
                 ))
               ) : (
                 <TableRow>
-                  <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">
+                  <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
                     {reportQuery.isLoading ? "Loading report..." : "No work logs matched the current filters."}
                   </TableCell>
                 </TableRow>

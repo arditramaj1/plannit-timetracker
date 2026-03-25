@@ -29,6 +29,14 @@ class WorkLogEntry(models.Model):
             ),
         ]
 
+    @property
+    def duration_hours(self) -> int:
+        return max(1, self.duration_minutes // 60)
+
+    @property
+    def end_hour_slot(self) -> int:
+        return self.hour_slot + self.duration_hours
+
     def clean(self) -> None:
         if self.project_id:
             previous_project_id = None
@@ -40,13 +48,37 @@ class WorkLogEntry(models.Model):
             is_project_change = previous_project_id is not None and previous_project_id != self.project_id
             if (is_new_entry or is_project_change) and not self.project.is_active:
                 raise ValidationError({"project": "Only active projects can be selected for new logs."})
-        if self.duration_minutes != 60:
-            raise ValidationError({"duration_minutes": "Time tracking uses fixed 1-hour slots."})
+
+        if self.duration_minutes < 60 or self.duration_minutes % 60 != 0:
+            raise ValidationError({"duration_minutes": "Duration must be in whole-hour increments."})
+
+        if self.end_hour_slot > 24:
+            raise ValidationError({"duration_minutes": "Work logs must end by 24:00."})
+
+        if self.user_id and self.work_date and self.hour_slot is not None:
+            overlapping_entries = (
+                type(self)
+                .objects.filter(user_id=self.user_id, work_date=self.work_date)
+                .exclude(pk=self.pk)
+                .order_by("hour_slot")
+            )
+            for existing_entry in overlapping_entries:
+                if self.hour_slot < existing_entry.end_hour_slot and existing_entry.hour_slot < self.end_hour_slot:
+                    raise ValidationError(
+                        {
+                            "hour_slot": (
+                                "This time range overlaps an existing work log from "
+                                f"{existing_entry.hour_slot:02d}:00 to {existing_entry.end_hour_slot:02d}:00."
+                            )
+                        }
+                    )
 
     def save(self, *args, **kwargs):
-        self.duration_minutes = 60
         self.full_clean()
         return super().save(*args, **kwargs)
 
     def __str__(self) -> str:
-        return f"{self.user} | {self.work_date} @ {self.hour_slot:02d}:00"
+        return (
+            f"{self.user} | {self.work_date} @ {self.hour_slot:02d}:00"
+            f"-{self.end_hour_slot:02d}:00"
+        )

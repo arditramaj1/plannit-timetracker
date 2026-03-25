@@ -37,6 +37,48 @@ function buildHourSlots(startHour: number, endHour: number) {
   return Array.from({ length: lastHour - firstHour + 1 }, (_, index) => firstHour + index);
 }
 
+function getEntryHourSlots(entry: WorkLogEntry) {
+  const durationHours = Math.max(1, entry.duration_minutes / 60);
+  return buildHourSlots(entry.hour_slot, entry.hour_slot + durationHours - 1);
+}
+
+function formatHourLabel(hour: number) {
+  return `${hour.toString().padStart(2, "0")}:00`;
+}
+
+function formatHourTotal(totalHours: number) {
+  return Number.isInteger(totalHours) ? String(totalHours) : totalHours.toFixed(1);
+}
+
+function getOverlappingEntries(
+  entries: WorkLogEntry[],
+  workDate: string,
+  hourSlots: number[],
+  ignoredEntryId?: number | null,
+) {
+  const startHour = hourSlots[0];
+  const endHour = hourSlots[hourSlots.length - 1] + 1;
+
+  return entries
+    .filter((entry) => entry.work_date === workDate && entry.id !== ignoredEntryId)
+    .filter((entry) => {
+      const entryEndHour = entry.hour_slot + Math.max(1, entry.duration_minutes / 60);
+      return startHour < entryEndHour && entry.hour_slot < endHour;
+    })
+    .sort((left, right) => left.hour_slot - right.hour_slot);
+}
+
+function sortWorkLogs(entries: WorkLogEntry[]) {
+  return [...entries].sort(
+    (left, right) =>
+      left.work_date.localeCompare(right.work_date) || left.hour_slot - right.hour_slot || left.id - right.id,
+  );
+}
+
+function upsertWorkLogEntry(entries: WorkLogEntry[], nextEntry: WorkLogEntry) {
+  return sortWorkLogs([...entries.filter((entry) => entry.id !== nextEntry.id), nextEntry]);
+}
+
 export function CalendarPageClient() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
@@ -44,6 +86,7 @@ export function CalendarPageClient() {
   const [anchorDate, setAnchorDate] = useState(() => new Date());
   const [dialogState, setDialogState] = useState<DialogState | null>(null);
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
+  const [resizeEntry, setResizeEntry] = useState<WorkLogEntry | null>(null);
 
   const weekDates = useMemo(() => getWeekDates(anchorDate), [anchorDate]);
   const weekStart = weekDates[0];
@@ -82,6 +125,7 @@ export function CalendarPageClient() {
   useEffect(() => {
     if (isAdmin) {
       setDialogState(null);
+      setResizeEntry(null);
     }
   }, [isAdmin, selectedUserId]);
 
@@ -94,8 +138,15 @@ export function CalendarPageClient() {
     queryFn: listProjects,
   });
 
+  const worklogsQueryKey = [
+    "worklogs",
+    formatApiDate(weekStart),
+    formatApiDate(weekEnd),
+    isAdmin ? selectedUserId ?? "none" : "self",
+  ] as const;
+
   const worklogsQuery = useQuery({
-    queryKey: ["worklogs", formatApiDate(weekStart), formatApiDate(weekEnd), isAdmin ? selectedUserId ?? "none" : "self"],
+    queryKey: worklogsQueryKey,
     enabled: !isAdmin || Boolean(selectedUserId),
     queryFn: () =>
       listWorkLogs({
@@ -105,8 +156,12 @@ export function CalendarPageClient() {
       }),
   });
 
+  function updateVisibleWorkLogs(updater: (entries: WorkLogEntry[]) => WorkLogEntry[]) {
+    queryClient.setQueryData<WorkLogEntry[]>(worklogsQueryKey, (current) => updater(current ?? []));
+  }
+
   const saveMutation = useMutation({
-    mutationFn: async (payload: { project: number; notes: string }) => {
+    mutationFn: async (payload: { project: number; notes: string; hourSlot: number; durationMinutes: number }) => {
       if (!dialogState) {
         throw new Error("No calendar slot selected.");
       }
@@ -115,21 +170,25 @@ export function CalendarPageClient() {
         return updateWorkLog(dialogState.entry.id, {
           notes: payload.notes,
           ...(payload.project !== dialogState.entry.project ? { project: payload.project } : {}),
+          ...(payload.hourSlot !== dialogState.entry.hour_slot ? { hour_slot: payload.hourSlot } : {}),
+          ...(payload.durationMinutes !== dialogState.entry.duration_minutes
+            ? { duration_minutes: payload.durationMinutes }
+            : {}),
         });
       }
 
       const workDate = formatApiDate(dialogState.day);
-      if (dialogState.hourSlots.length > 1) {
+      const durationHours = payload.durationMinutes / 60;
+      if (durationHours > 1) {
         return createWorkLogRange({
           ...(isAdmin && selectedUserId ? { user: selectedUserId } : {}),
           project: payload.project,
           notes: payload.notes,
           work_date: workDate,
-          hour_slots: dialogState.hourSlots,
+          hour_slots: buildHourSlots(payload.hourSlot, payload.hourSlot + durationHours - 1),
         });
       }
 
-      const [hourSlot] = dialogState.hourSlots;
       if (isAdmin) {
         if (!selectedUserId) {
           throw new Error("Choose a user before saving a work log.");
@@ -139,7 +198,8 @@ export function CalendarPageClient() {
           project: payload.project,
           notes: payload.notes,
           work_date: workDate,
-          hour_slot: hourSlot,
+          hour_slot: payload.hourSlot,
+          duration_minutes: payload.durationMinutes,
         });
       }
 
@@ -147,14 +207,17 @@ export function CalendarPageClient() {
         project: payload.project,
         notes: payload.notes,
         work_date: workDate,
-        hour_slot: hourSlot,
+        hour_slot: payload.hourSlot,
+        duration_minutes: payload.durationMinutes,
       });
     },
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["worklogs"] });
-      await queryClient.invalidateQueries({ queryKey: ["reports"] });
+    onSuccess: (savedEntry) => {
+      updateVisibleWorkLogs((entries) => upsertWorkLogEntry(entries, savedEntry));
+      void queryClient.invalidateQueries({ queryKey: ["worklogs"], refetchType: "inactive" });
+      void queryClient.invalidateQueries({ queryKey: ["reports"] });
       toast.success("Work log saved.");
       setDialogState(null);
+      setResizeEntry(null);
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Unable to save the work log.");
@@ -168,11 +231,15 @@ export function CalendarPageClient() {
       }
       return deleteWorkLog(dialogState.entry.id);
     },
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["worklogs"] });
-      await queryClient.invalidateQueries({ queryKey: ["reports"] });
+    onSuccess: () => {
+      if (dialogState?.entry) {
+        updateVisibleWorkLogs((entries) => entries.filter((entry) => entry.id !== dialogState.entry?.id));
+      }
+      void queryClient.invalidateQueries({ queryKey: ["worklogs"], refetchType: "inactive" });
+      void queryClient.invalidateQueries({ queryKey: ["reports"] });
       toast.success("Work log deleted.");
       setDialogState(null);
+      setResizeEntry(null);
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Unable to delete the work log.");
@@ -181,19 +248,31 @@ export function CalendarPageClient() {
 
   const activeProjects = (projectsQuery.data ?? []).filter((project) => project.is_active);
   const worklogs = worklogsQuery.data ?? [];
-  const canCreateEntries = activeProjects.length > 0 && (!isAdmin || Boolean(selectedUser));
+  const totalLoggedHours = worklogs.reduce((sum, entry) => sum + entry.duration_minutes, 0) / 60;
+  const canSelectRanges = (!isAdmin || Boolean(selectedUser)) && (activeProjects.length > 0 || Boolean(resizeEntry));
 
   function openRangeSelection(day: Date, startHour: number, endHour: number) {
     const hourSlots = buildHourSlots(startHour, endHour);
     const workDate = formatApiDate(day);
-    const occupiedHours = worklogs
-      .filter((entry) => entry.work_date === workDate && hourSlots.includes(entry.hour_slot))
-      .map((entry) => entry.hour_slot)
-      .sort((left, right) => left - right);
 
-    if (occupiedHours.length > 0) {
-      const formattedHours = occupiedHours.map((hour) => `${hour.toString().padStart(2, "0")}:00`).join(", ");
-      toast.error(`Some selected hours already have work logs: ${formattedHours}.`);
+    if (resizeEntry && resizeEntry.work_date !== workDate) {
+      toast.error("Resize on calendar currently works within the same day only.");
+      return;
+    }
+
+    const overlappingEntries = getOverlappingEntries(worklogs, workDate, hourSlots, resizeEntry?.id ?? null);
+    if (overlappingEntries.length > 0) {
+      const formattedRanges = overlappingEntries
+        .map((entry) => `${formatHourLabel(entry.hour_slot)} to ${formatHourLabel(entry.hour_slot + entry.duration_minutes / 60)}`)
+        .join(", "
+        );
+      toast.error(`This selection overlaps existing work logs: ${formattedRanges}.`);
+      return;
+    }
+
+    if (resizeEntry) {
+      setDialogState({ day, hourSlots, entry: resizeEntry });
+      setResizeEntry(null);
       return;
     }
 
@@ -201,21 +280,24 @@ export function CalendarPageClient() {
   }
 
   function openExistingEntry(entry: WorkLogEntry) {
+    setResizeEntry(null);
     setDialogState({
       day: safeParseDate(entry.work_date),
-      hourSlots: [entry.hour_slot],
+      hourSlots: getEntryHourSlots(entry),
       entry,
     });
   }
 
-  const calendarDescription = isAdmin
-    ? selectedUser
-      ? "Select a teammate, then click or drag down across empty hours to add a shared note and project for the whole block."
-      : "Choose a teammate to view and manage their weekly calendar."
-    : "Click a slot or drag down across empty hours to add one project and note across a longer time block.";
+  const calendarDescription = resizeEntry
+    ? "Resize mode is active. Drag a new range on the same day to change this work log's duration."
+    : isAdmin
+      ? selectedUser
+        ? "Select a teammate, then click or drag across empty hours to create one multi-hour work log with a shared note and project."
+        : "Choose a teammate to view and manage their weekly calendar."
+      : "Click a slot or drag across empty hours to create one work log that can span multiple hourly blocks.";
   const hoursSummary = selectedUser
-    ? `${selectedUser.display_name}: ${worklogs.length} logged ${worklogs.length === 1 ? "hour" : "hours"}`
-    : `${worklogs.length} logged ${worklogs.length === 1 ? "hour" : "hours"}`;
+    ? `${selectedUser.display_name}: ${formatHourTotal(totalLoggedHours)} logged ${totalLoggedHours === 1 ? "hour" : "hours"}`
+    : `${formatHourTotal(totalLoggedHours)} logged ${totalLoggedHours === 1 ? "hour" : "hours"}`;
   const isLoading = projectsQuery.isLoading || worklogsQuery.isLoading || (isAdmin && usersQuery.isLoading);
   const hasError = projectsQuery.isError || worklogsQuery.isError || (isAdmin && usersQuery.isError);
 
@@ -257,6 +339,20 @@ export function CalendarPageClient() {
           </>
         }
       />
+
+      {resizeEntry ? (
+        <div className="flex flex-col gap-3 rounded-2xl border border-primary/20 bg-primary/5 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-semibold text-slate-950">Resize mode is active</p>
+            <p className="text-sm text-slate-700">
+              Drag a new range on {format(safeParseDate(resizeEntry.work_date), "EEEE, MMM d")} to resize this work log.
+            </p>
+          </div>
+          <Button variant="outline" onClick={() => setResizeEntry(null)}>
+            Cancel resize
+          </Button>
+        </div>
+      ) : null}
 
       <Card className="overflow-hidden">
         <CardContent className="space-y-4 p-4 lg:p-6">
@@ -317,7 +413,8 @@ export function CalendarPageClient() {
               entries={worklogs}
               onRangeSelect={openRangeSelection}
               onEntryClick={openExistingEntry}
-              allowCreate={canCreateEntries}
+              allowCreate={canSelectRanges}
+              resizingEntryId={resizeEntry?.id ?? null}
             />
           )}
         </CardContent>
@@ -343,6 +440,15 @@ export function CalendarPageClient() {
         onDelete={async () => {
           await deleteMutation.mutateAsync();
         }}
+        onResizeWithCalendar={
+          dialogState?.entry
+            ? () => {
+                setResizeEntry(dialogState.entry ?? null);
+                setDialogState(null);
+                toast("Drag a new range on the same day to resize this work log.");
+              }
+            : undefined
+        }
       />
     </div>
   );

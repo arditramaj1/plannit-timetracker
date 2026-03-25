@@ -1,7 +1,7 @@
 "use client";
 
 import { format } from "date-fns";
-import { LoaderCircle, Trash2 } from "lucide-react";
+import { LoaderCircle, Maximize2, Trash2 } from "lucide-react";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 
 import { Project, WorkLogEntry } from "@/lib/types";
@@ -18,6 +18,10 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 
+function formatHourLabel(hour: number) {
+  return `${hour.toString().padStart(2, "0")}:00`;
+}
+
 type WorklogDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -28,8 +32,9 @@ type WorklogDialogProps = {
   userLabel?: string | null;
   isSaving: boolean;
   isDeleting: boolean;
-  onSave: (payload: { project: number; notes: string }) => Promise<void>;
+  onSave: (payload: { project: number; notes: string; hourSlot: number; durationMinutes: number }) => Promise<void>;
   onDelete: () => Promise<void>;
+  onResizeWithCalendar?: () => void;
 };
 
 export function WorklogDialog({
@@ -44,9 +49,13 @@ export function WorklogDialog({
   isDeleting,
   onSave,
   onDelete,
+  onResizeWithCalendar,
 }: WorklogDialogProps) {
   const [project, setProject] = useState("");
   const [notes, setNotes] = useState("");
+  const [startHour, setStartHour] = useState(0);
+  const [endHour, setEndHour] = useState(1);
+
   const sortedHourSlots = useMemo(() => [...hourSlots].sort((left, right) => left - right), [hourSlots]);
   const projectOptions = useMemo(
     () =>
@@ -56,46 +65,55 @@ export function WorklogDialog({
     [entry, projects],
   );
 
+  const initialStartHour = sortedHourSlots[0] ?? entry?.hour_slot ?? 0;
+  const initialEndHour = (sortedHourSlots[sortedHourSlots.length - 1] ?? entry?.hour_slot ?? 0) + 1;
+
   useEffect(() => {
     if (!open) {
       return;
     }
     setProject(entry ? String(entry.project) : projectOptions[0] ? String(projectOptions[0].id) : "");
     setNotes(entry?.notes ?? "");
-  }, [entry, open, projectOptions]);
+    setStartHour(initialStartHour);
+    setEndHour(initialEndHour);
+  }, [entry, initialEndHour, initialStartHour, open, projectOptions]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!project) {
+    if (!project || endHour <= startHour) {
       return;
     }
-    await onSave({ project: Number(project), notes });
+    await onSave({
+      project: Number(project),
+      notes,
+      hourSlot: startHour,
+      durationMinutes: (endHour - startHour) * 60,
+    });
   }
 
   const isEditing = Boolean(entry);
-  const slotCount = sortedHourSlots.length;
+  const slotCount = endHour - startHour;
   const formattedSlot = useMemo(() => {
-    if (!day || slotCount === 0) {
+    if (!day || slotCount <= 0) {
       return "";
     }
-    const startHour = sortedHourSlots[0];
     if (slotCount === 1) {
-      return `${format(day, "EEEE, MMM d")} at ${startHour.toString().padStart(2, "0")}:00`;
+      return `${format(day, "EEEE, MMM d")} at ${formatHourLabel(startHour)}`;
     }
-    const endHour = sortedHourSlots[slotCount - 1] + 1;
-    return `${format(day, "EEEE, MMM d")} from ${startHour.toString().padStart(2, "0")}:00 to ${endHour.toString().padStart(2, "0")}:00`;
-  }, [day, slotCount, sortedHourSlots]);
+    return `${format(day, "EEEE, MMM d")} from ${formatHourLabel(startHour)} to ${formatHourLabel(endHour)}`;
+  }, [day, endHour, slotCount, startHour]);
 
-  const selectionHint = !isEditing && slotCount > 1
-    ? `This will create ${slotCount} one-hour work logs with the same project and notes.`
+  const selectionHint = slotCount > 1
+    ? isEditing
+      ? `This work log spans ${slotCount} hourly blocks as one shared entry.`
+      : `This will create one work log spanning ${slotCount} hourly blocks with one shared note and project.`
     : null;
-  const dialogTitle = isEditing ? "Edit work log" : slotCount > 1 ? "Add work logs" : "Add work log";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{dialogTitle}</DialogTitle>
+          <DialogTitle>{isEditing ? "Edit work log" : "Add work log"}</DialogTitle>
           <DialogDescription>
             {formattedSlot || "Select a calendar slot to create a work log entry."}
           </DialogDescription>
@@ -104,8 +122,7 @@ export function WorklogDialog({
         <form className="space-y-4" onSubmit={handleSubmit}>
           {userLabel ? (
             <div className="rounded-2xl bg-secondary px-4 py-3 text-sm text-secondary-foreground">
-              Saving {slotCount > 1 && !isEditing ? "these work logs" : "this work log"} for{" "}
-              <span className="font-semibold text-slate-950">{userLabel}</span>.
+              Saving this {slotCount}-hour work log for <span className="font-semibold text-slate-950">{userLabel}</span>.
             </div>
           ) : null}
 
@@ -114,6 +131,47 @@ export function WorklogDialog({
               {selectionHint}
             </div>
           ) : null}
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="start-hour">Start</Label>
+              <Select
+                value={String(startHour)}
+                onValueChange={(value) => {
+                  const nextStartHour = Number(value);
+                  setStartHour(nextStartHour);
+                  setEndHour((current) => (current <= nextStartHour ? nextStartHour + 1 : current));
+                }}
+              >
+                <SelectTrigger id="start-hour">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {Array.from({ length: 24 }, (_, hour) => (
+                    <SelectItem key={hour} value={String(hour)}>
+                      {formatHourLabel(hour)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="end-hour">End</Label>
+              <Select value={String(endHour)} onValueChange={(value) => setEndHour(Number(value))}>
+                <SelectTrigger id="end-hour">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {Array.from({ length: 24 - startHour }, (_, offset) => startHour + offset + 1).map((hour) => (
+                    <SelectItem key={hour} value={String(hour)}>
+                      {formatHourLabel(hour)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
 
           <div className="space-y-2">
             <Label htmlFor="project">Project</Label>
@@ -142,7 +200,18 @@ export function WorklogDialog({
           </div>
 
           <DialogFooter className="justify-between">
-            <div>
+            <div className="flex items-center gap-2">
+              {isEditing && onResizeWithCalendar ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={onResizeWithCalendar}
+                  disabled={isSaving || isDeleting}
+                >
+                  <Maximize2 className="h-4 w-4" />
+                  Resize on calendar
+                </Button>
+              ) : null}
               {isEditing ? (
                 <Button
                   type="button"
@@ -159,7 +228,7 @@ export function WorklogDialog({
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={!project || isSaving || isDeleting}>
+              <Button type="submit" disabled={!project || slotCount <= 0 || isSaving || isDeleting}>
                 {isSaving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
                 Save
               </Button>

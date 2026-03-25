@@ -6,7 +6,7 @@ This repository is a monorepo for a calendar-based time tracking application wit
 
 - Backend: Django, Django REST Framework, PostgreSQL, JWT authentication, Django admin.
 - Frontend: Next.js App Router, React, Tailwind CSS, shadcn-style component primitives, TanStack Query.
-- Infrastructure: Dockerized backend/frontend/database services, VS Code devcontainer, seed scripts, health checks, environment-driven configuration.
+- Infrastructure: local backend/frontend workflow, optional Dockerized PostgreSQL for development, seed scripts, health checks, environment-driven configuration.
 
 Key architectural choices:
 
@@ -19,10 +19,6 @@ Key architectural choices:
 
 ```text
 .
-├── .devcontainer/
-│   ├── Dockerfile.dev
-│   ├── devcontainer.json
-│   └── post-create.sh
 ├── backend/
 │   ├── apps/
 │   │   ├── accounts/
@@ -162,23 +158,70 @@ Important environment variables:
 - `POSTGRES_DB`
 - `POSTGRES_USER`
 - `POSTGRES_PASSWORD`
+- `POSTGRES_HOST`
+- `POSTGRES_PORT`
 - `NEXT_PUBLIC_API_BASE_URL`
 
 ## Development Run Instructions
 
-### Docker Compose
+### Local Development
+
+For local development, run the frontend and backend directly on your machine. PostgreSQL can run in a local container, but the database tables are created by Django migrations, not by Docker.
 
 ```bash
 cp .env.example .env
 cp backend/.env.example backend/.env
 cp frontend/.env.local.example frontend/.env.local
-docker compose up --build
 ```
 
-Or use the helper script:
+Install dependencies locally:
+
+```bash
+cd backend
+uv sync --locked
+
+cd ../frontend
+npm ci
+```
+
+Start PostgreSQL in a local container:
 
 ```bash
 bash scripts/dev-up.sh
+```
+
+If you prefer to run it directly:
+
+```bash
+docker compose up -d db
+```
+
+Run Django migrations locally to create/update the tables in that PostgreSQL container:
+
+```bash
+cd backend
+uv run python manage.py migrate --noinput
+uv run python manage.py seed_demo_data || true
+```
+
+Start the backend locally:
+
+```bash
+cd backend
+uv run python manage.py runserver 0.0.0.0:8000
+```
+
+Start the frontend locally in a second terminal:
+
+```bash
+cd frontend
+npm run dev
+```
+
+To stop the PostgreSQL container:
+
+```bash
+bash scripts/dev-down.sh
 ```
 
 Application URLs:
@@ -191,45 +234,6 @@ Seeded credentials:
 
 - Admin: `admin / admin123`
 - Regular user: `alex / demo123`
-
-### Devcontainer
-
-Open the repository in VS Code and choose **Reopen in Container**.
-If you already have the devcontainer running, use **Dev Containers: Rebuild Container** after pulling these changes so the Docker CLI and socket mount are applied.
-
-The devcontainer:
-
-- installs Python, Node.js, PostgreSQL server/client, and the Docker CLI/Compose plugin
-- includes an `ubuntu` user in the image
-- starts PostgreSQL from the container entrypoint and provisions the configured local database/user
-- runs the VS Code session as `ubuntu`
-- repairs bind-mounted workspace ownership on first create so `ubuntu` can write the repo
-- mounts the host Docker socket so `docker compose up` works from inside the container
-- runs `uv sync --locked` in `backend/`, which creates `backend/.venv` from `backend/uv.lock`
-- installs frontend dependencies with `npm install`
-
-From inside the devcontainer, the recommended workflow is:
-
-- let the devcontainer start PostgreSQL automatically
-- run the backend locally with `uv`
-- run the frontend locally with `npm`
-
-After the container is created:
-
-- the backend environment is ready in `backend/.venv`
-- the frontend dependencies are installed in `frontend/node_modules`
-- no manual `python -m venv` or `pip install -r ...` step is needed anymore
-- PostgreSQL should already be running on port `5432`
-
-To see the application from inside the devcontainer:
-
-1. Make sure `.env`, `backend/.env`, and `frontend/.env.local` exist.
-2. Open the repo in the devcontainer and wait for PostgreSQL to start automatically.
-3. In `backend/`, run `uv run python manage.py migrate --noinput`.
-4. In `backend/`, run `uv run python manage.py seed_demo_data || true`.
-5. In `backend/`, run `uv run python manage.py runserver 0.0.0.0:8000`.
-6. In `frontend/`, run `npm run dev`.
-7. Open `http://localhost:3000` for the app, `http://localhost:8000/api/v1` for the API, or `http://localhost:8000/admin` for Django admin.
 
 ## Production Notes
 

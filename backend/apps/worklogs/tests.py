@@ -11,7 +11,7 @@ from apps.worklogs.models import WorkLogEntry
 User = get_user_model()
 
 
-class WorkLogBulkCreateApiTests(TestCase):
+class WorkLogMultiHourApiTests(TestCase):
     def setUp(self):
         self.client = APIClient()
         self.project = Project.objects.create(code="ENG", name="Engineering", color_hex="#0EA5E9")
@@ -30,7 +30,7 @@ class WorkLogBulkCreateApiTests(TestCase):
         self.bulk_create_url = reverse("worklog-bulk-create")
         self.work_date = date.today() - timedelta(days=date.today().weekday())
 
-    def test_employee_can_create_multiple_contiguous_entries_with_one_note(self):
+    def test_employee_bulk_create_stores_one_multi_hour_entry(self):
         self.client.force_authenticate(user=self.employee)
 
         response = self.client.post(
@@ -38,28 +38,29 @@ class WorkLogBulkCreateApiTests(TestCase):
             {
                 "project": self.project.id,
                 "work_date": self.work_date.isoformat(),
-                "hour_slots": [9, 10, 11],
+                "hour_slots": [9, 10, 11, 12],
                 "notes": "Deep work block",
             },
             format="json",
         )
 
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(len(response.data), 3)
+        self.assertEqual(response.data["hour_slot"], 9)
+        self.assertEqual(response.data["duration_minutes"], 240)
 
-        entries = list(
-            WorkLogEntry.objects.filter(user=self.employee, work_date=self.work_date).order_by("hour_slot")
-        )
-        self.assertEqual([entry.hour_slot for entry in entries], [9, 10, 11])
-        self.assertTrue(all(entry.notes == "Deep work block" for entry in entries))
-        self.assertTrue(all(entry.duration_minutes == 60 for entry in entries))
+        entries = list(WorkLogEntry.objects.filter(user=self.employee, work_date=self.work_date))
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].hour_slot, 9)
+        self.assertEqual(entries[0].duration_minutes, 240)
+        self.assertEqual(entries[0].notes, "Deep work block")
 
-    def test_bulk_create_rejects_overlapping_hour_slots(self):
+    def test_bulk_create_rejects_overlap_with_existing_multi_hour_entry(self):
         WorkLogEntry.objects.create(
             user=self.employee,
             project=self.project,
             work_date=self.work_date,
             hour_slot=10,
+            duration_minutes=120,
             notes="Existing",
         )
         self.client.force_authenticate(user=self.employee)
@@ -98,10 +99,11 @@ class WorkLogBulkCreateApiTests(TestCase):
             WorkLogEntry.objects.filter(
                 user=self.employee,
                 work_date=self.work_date,
-                hour_slot__in=[13, 14],
+                hour_slot=13,
             ).count(),
-            2,
+            1,
         )
+        self.assertEqual(other_user_response.data["duration_minutes"], 120)
 
         self_response = self.client.post(
             self.bulk_create_url,
@@ -120,3 +122,58 @@ class WorkLogBulkCreateApiTests(TestCase):
             self_response.data["user"][0],
             "Admins cannot create or edit work logs for themselves.",
         )
+
+    def test_user_can_resize_existing_entry_later(self):
+        entry = WorkLogEntry.objects.create(
+            user=self.employee,
+            project=self.project,
+            work_date=self.work_date,
+            hour_slot=9,
+            duration_minutes=120,
+            notes="Initial block",
+        )
+        self.client.force_authenticate(user=self.employee)
+
+        response = self.client.patch(
+            reverse("worklog-detail", args=[entry.id]),
+            {
+                "duration_minutes": 240,
+                "notes": "Expanded block",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        entry.refresh_from_db()
+        self.assertEqual(entry.duration_minutes, 240)
+        self.assertEqual(entry.notes, "Expanded block")
+
+    def test_resize_rejects_overlap_with_another_entry(self):
+        entry = WorkLogEntry.objects.create(
+            user=self.employee,
+            project=self.project,
+            work_date=self.work_date,
+            hour_slot=9,
+            duration_minutes=120,
+            notes="Initial block",
+        )
+        WorkLogEntry.objects.create(
+            user=self.employee,
+            project=self.project,
+            work_date=self.work_date,
+            hour_slot=12,
+            duration_minutes=60,
+            notes="Conflicting block",
+        )
+        self.client.force_authenticate(user=self.employee)
+
+        response = self.client.patch(
+            reverse("worklog-detail", args=[entry.id]),
+            {
+                "duration_minutes": 240,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("hour_slot", response.data)
