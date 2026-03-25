@@ -89,9 +89,6 @@ default_db = (
 
 database_url = env("DATABASE_URL", default_db)
 
-print("DEBUG default_db =", default_db)
-print("DEBUG DATABASE_URL =", database_url)
-
 DATABASES = {
     "default": dj_database_url.parse(
         database_url,
@@ -99,15 +96,6 @@ DATABASES = {
         conn_health_checks=True,
     )
 }
-
-print("DEBUG parsed DATABASES['default'] =", {
-    "ENGINE": DATABASES["default"].get("ENGINE"),
-    "NAME": DATABASES["default"].get("NAME"),
-    "USER": DATABASES["default"].get("USER"),
-    "PASSWORD": DATABASES["default"].get("PASSWORD"),
-    "HOST": DATABASES["default"].get("HOST"),
-    "PORT": DATABASES["default"].get("PORT"),
-})
 
 AUTH_PASSWORD_VALIDATORS = [
     {
