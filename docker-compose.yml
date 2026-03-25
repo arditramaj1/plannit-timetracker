@@ -48,7 +48,7 @@ services:
       - backend_static:/app/staticfiles
       - backend_media:/app/media
     depends_on:
-      db:
+      plannit_db:
         condition: service_healthy
     networks:
       - internal-bridge
