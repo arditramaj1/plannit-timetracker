@@ -89,7 +89,7 @@ default_db = (
 
 database_url = env("DATABASE_URL", default_db)
 
-print("DEBUG default_db =", default_db))
+print("DEBUG default_db =", default_db)
 print("DEBUG DATABASE_URL =", database_url)
 
 DATABASES = {
