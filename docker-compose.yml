@@ -43,8 +43,6 @@ services:
     volumes:
       - backend_static:/app/staticfiles
       - backend_media:/app/media
-    expose:
-      - "8000"
     depends_on:
       db:
         condition: service_healthy
@@ -65,8 +63,6 @@ services:
       NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL}
       NEXT_PUBLIC_DEFAULT_WEEK_START: ${NEXT_PUBLIC_DEFAULT_WEEK_START}
       NODE_ENV: production
-    expose:
-      - "3000"
     networks:
       - app-network
       - dokploy-network
