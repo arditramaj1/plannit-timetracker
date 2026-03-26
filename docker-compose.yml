@@ -1,5 +1,5 @@
 services:
-  db:
+  plannit_db:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
@@ -33,7 +33,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_HOST: db
+      POSTGRES_HOST: plannit_db
       POSTGRES_PORT: "5432"
       DJANGO_COLLECTSTATIC: ${DJANGO_COLLECTSTATIC}
       DJANGO_SEED_DEMO_DATA: ${DJANGO_SEED_DEMO_DATA}
@@ -48,7 +48,7 @@ services:
       - backend_static:/app/staticfiles
       - backend_media:/app/media
     depends_on:
-      db:
+      plannit_db:
         condition: service_healthy
     networks:
       - internal-bridge
