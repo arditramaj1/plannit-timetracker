@@ -31,6 +31,7 @@ type DialogState = {
   day: Date;
   hourSlots: number[];
   entry?: WorkLogEntry | null;
+  blockedProjectIds?: number[];
 };
 
 function getDefaultSelectedUserId(users: AppUser[], currentUserId?: number) {
@@ -51,6 +52,12 @@ function getEntryHourSlots(entry: WorkLogEntry) {
 
 function getEntryEndHour(entry: WorkLogEntry) {
   return entry.hour_slot + Math.max(1, entry.duration_minutes / 60);
+}
+
+function getParallelWindowEntries(entries: WorkLogEntry[], targetEntry: WorkLogEntry) {
+  return entries.filter(
+    (entry) => entry.work_date === targetEntry.work_date && entry.hour_slot === targetEntry.hour_slot,
+  );
 }
 
 function buildParallelEntryWindowMap(entries: WorkLogEntry[]) {
@@ -197,6 +204,9 @@ export function CalendarPageClient() {
   const activeProjects = (projectsQuery.data ?? []).filter((project) => project.is_active);
   const worklogs = useMemo(() => worklogsQuery.data ?? [], [worklogsQuery.data]);
   const parallelEntryWindowMap = useMemo(() => buildParallelEntryWindowMap(worklogs), [worklogs]);
+  const dialogProjects = dialogState?.blockedProjectIds?.length
+    ? activeProjects.filter((project) => !dialogState.blockedProjectIds?.includes(project.id))
+    : activeProjects;
 
   function updateVisibleWorkLogs(updater: (entries: WorkLogEntry[]) => WorkLogEntry[]) {
     queryClient.setQueryData<WorkLogEntry[]>(worklogsQueryKey, (current) => updater(current ?? []));
@@ -527,7 +537,7 @@ export function CalendarPageClient() {
         day={dialogState?.day ?? null}
         hourSlots={dialogState?.hourSlots ?? []}
         entry={dialogState?.entry ?? null}
-        projects={activeProjects as Project[]}
+        projects={dialogProjects as Project[]}
         userLabel={isAdmin ? selectedUser?.display_name ?? null : null}
         canLogParallelProjects={canLogParallelProjects}
         isSaving={saveMutation.isPending}
@@ -550,10 +560,20 @@ export function CalendarPageClient() {
         onAddParallelProjects={
           activeDialogEntry && canLogParallelProjects
             ? () => {
+                const usedProjectIds = Array.from(
+                  new Set(getParallelWindowEntries(worklogs, activeDialogEntry).map((entry) => entry.project)),
+                );
+                const remainingProjects = activeProjects.filter((project) => !usedProjectIds.includes(project.id));
+                if (remainingProjects.length === 0) {
+                  toast.error("All active projects are already part of this parallel work.");
+                  return;
+                }
+
                 setResizeEntry(null);
                 setDialogState({
                   day: safeParseDate(activeDialogEntry.work_date),
                   hourSlots: getEntryHourSlots(activeDialogEntry),
+                  blockedProjectIds: usedProjectIds,
                 });
               }
             : undefined
