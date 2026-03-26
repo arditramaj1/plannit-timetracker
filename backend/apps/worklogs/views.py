@@ -8,7 +8,7 @@ from apps.common.permissions import IsOwnerOrAdmin
 
 from .filters import WorkLogEntryFilter
 from .models import WorkLogEntry
-from .serializers import WorkLogBulkCreateSerializer, WorkLogEntrySerializer
+from .serializers import ParallelWorkLogCreateSerializer, WorkLogBulkCreateSerializer, WorkLogEntrySerializer
 
 
 class WorkLogEntryViewSet(ModelViewSet):
@@ -36,4 +36,12 @@ class WorkLogEntryViewSet(ModelViewSet):
         serializer.is_valid(raise_exception=True)
         entry = serializer.save()
         response_serializer = self.get_serializer(entry)
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=["post"], url_path="parallel-create")
+    def parallel_create(self, request, *args, **kwargs):
+        serializer = ParallelWorkLogCreateSerializer(data=request.data, context=self.get_serializer_context())
+        serializer.is_valid(raise_exception=True)
+        entries = serializer.save()
+        response_serializer = self.get_serializer(entries, many=True)
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)

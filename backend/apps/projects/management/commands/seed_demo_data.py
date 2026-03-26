@@ -2,6 +2,7 @@ import os
 from datetime import date, timedelta
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Permission
 from django.core.management.base import BaseCommand
 
 from apps.projects.models import Project
@@ -48,6 +49,9 @@ class Command(BaseCommand):
         if demo_created:
             demo_user.set_password(demo_password)
         demo_user.save()
+        parallel_permission = Permission.objects.filter(codename="can_log_parallel_projects").first()
+        if parallel_permission is not None:
+            demo_user.user_permissions.add(parallel_permission)
 
         projects = [
             {"code": "OPS", "name": "Operations", "color_hex": "#0F766E"},

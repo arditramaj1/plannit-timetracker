@@ -24,9 +24,11 @@ type DragSelection = {
   endHour: number;
 };
 
-type OccupiedSlot = {
+type EntryLayout = {
   entry: WorkLogEntry;
-  isStart: boolean;
+  columnIndex: number;
+  columnCount: number;
+  clusterSize: number;
 };
 
 const hours = Array.from({ length: 24 }, (_, hour) => hour);
@@ -39,8 +41,12 @@ function getDurationHours(entry: WorkLogEntry) {
   return Math.max(1, entry.duration_minutes / 60);
 }
 
+function getEntryEndHour(entry: WorkLogEntry) {
+  return entry.hour_slot + getDurationHours(entry);
+}
+
 function buildOccupiedSlotMap(entries: WorkLogEntry[], ignoredEntryId?: number | null) {
-  const occupiedSlotMap = new Map<string, OccupiedSlot>();
+  const occupiedSlotMap = new Map<string, number>();
 
   entries.forEach((entry) => {
     if (entry.id === ignoredEntryId) {
@@ -48,15 +54,108 @@ function buildOccupiedSlotMap(entries: WorkLogEntry[], ignoredEntryId?: number |
     }
 
     const durationHours = getDurationHours(entry);
-    Array.from({ length: durationHours }, (_, offset) => entry.hour_slot + offset).forEach((hourSlot, offset) => {
-      occupiedSlotMap.set(`${entry.work_date}-${hourSlot}`, {
-        entry,
-        isStart: offset === 0,
-      });
+    Array.from({ length: durationHours }, (_, offset) => entry.hour_slot + offset).forEach((hourSlot) => {
+      const key = `${entry.work_date}-${hourSlot}`;
+      occupiedSlotMap.set(key, (occupiedSlotMap.get(key) ?? 0) + 1);
     });
   });
 
   return occupiedSlotMap;
+}
+
+function buildEntryLayouts(entries: WorkLogEntry[], ignoredEntryId?: number | null) {
+  const layouts: EntryLayout[] = [];
+  const entriesByDay = new Map<string, WorkLogEntry[]>();
+
+  entries.forEach((entry) => {
+    if (entry.id === ignoredEntryId) {
+      return;
+    }
+
+    const dayEntries = entriesByDay.get(entry.work_date) ?? [];
+    dayEntries.push(entry);
+    entriesByDay.set(entry.work_date, dayEntries);
+  });
+
+  entriesByDay.forEach((dayEntries) => {
+    const sortedEntries = [...dayEntries].sort(
+      (left, right) =>
+        left.hour_slot - right.hour_slot ||
+        getEntryEndHour(right) - getEntryEndHour(left) ||
+        left.id - right.id,
+    );
+
+    let activeColumns: Array<{ columnIndex: number; endHour: number }> = [];
+    let currentCluster: EntryLayout[] = [];
+    let clusterColumnCount = 1;
+
+    function finalizeCluster() {
+      if (currentCluster.length === 0) {
+        return;
+      }
+
+      currentCluster.forEach((layout) => {
+        layouts.push({
+          ...layout,
+          columnCount: clusterColumnCount,
+          clusterSize: currentCluster.length,
+        });
+      });
+
+      activeColumns = [];
+      currentCluster = [];
+      clusterColumnCount = 1;
+    }
+
+    sortedEntries.forEach((entry) => {
+      activeColumns = activeColumns.filter((item) => item.endHour > entry.hour_slot);
+      if (activeColumns.length === 0 && currentCluster.length > 0) {
+        finalizeCluster();
+      }
+
+      const usedColumns = new Set(activeColumns.map((item) => item.columnIndex));
+      let columnIndex = 0;
+      while (usedColumns.has(columnIndex)) {
+        columnIndex += 1;
+      }
+
+      currentCluster.push({
+        entry,
+        columnIndex,
+        columnCount: 1,
+        clusterSize: 1,
+      });
+      activeColumns.push({
+        columnIndex,
+        endHour: getEntryEndHour(entry),
+      });
+      clusterColumnCount = Math.max(clusterColumnCount, activeColumns.length);
+    });
+
+    finalizeCluster();
+  });
+
+  return layouts.sort(
+    (left, right) =>
+      left.entry.work_date.localeCompare(right.entry.work_date) ||
+      left.entry.hour_slot - right.entry.hour_slot ||
+      left.columnIndex - right.columnIndex ||
+      left.entry.id - right.entry.id,
+  );
+}
+
+function getEntryLayoutStyle(columnIndex: number, columnCount: number) {
+  const horizontalInset = 8;
+  const columnGap = 8;
+  const totalGap = Math.max(0, columnCount - 1) * columnGap;
+
+  return {
+    justifySelf: "start" as const,
+    marginTop: "8px",
+    marginBottom: "8px",
+    marginLeft: `calc(${horizontalInset}px + (${columnIndex} * ((100% - ${horizontalInset * 2 + totalGap}px) / ${columnCount})) + ${columnIndex * columnGap}px)`,
+    width: `calc((100% - ${horizontalInset * 2 + totalGap}px) / ${columnCount})`,
+  };
 }
 
 function getRangeBounds(selection: DragSelection) {
@@ -75,10 +174,7 @@ export function WeeklyCalendar({
   resizingEntryId,
 }: WeeklyCalendarProps) {
   const occupiedSlotMap = useMemo(() => buildOccupiedSlotMap(entries, resizingEntryId), [entries, resizingEntryId]);
-  const visibleEntries = useMemo(
-    () => entries.filter((entry) => entry.id !== resizingEntryId),
-    [entries, resizingEntryId],
-  );
+  const visibleEntries = useMemo(() => buildEntryLayouts(entries, resizingEntryId), [entries, resizingEntryId]);
   const [dragSelection, setDragSelection] = useState<DragSelection | null>(null);
   const suppressEntryClickRef = useRef(false);
   const dayIndexByKey = useMemo(
@@ -180,7 +276,7 @@ export function WeeklyCalendar({
 
           return hours.map((hour) => {
             const key = `${dayKey}-${hour}`;
-            const occupiedSlot = occupiedSlotMap.get(key);
+            const occupiedSlotCount = occupiedSlotMap.get(key) ?? 0;
             const selectionActive = isSelected(dayKey, hour);
             const cellClassName = cn(
               "relative border-t p-2 transition-colors select-none",
@@ -189,7 +285,7 @@ export function WeeklyCalendar({
               selectionActive ? "bg-primary/10 ring-2 ring-inset ring-primary/30" : null,
             );
 
-            if (allowCreate && !occupiedSlot) {
+            if (allowCreate && occupiedSlotCount === 0) {
               return (
                 <button
                   key={key}
@@ -221,7 +317,7 @@ export function WeeklyCalendar({
 
             return (
               <div key={key} style={{ gridColumn: dayIndex + 2, gridRow: hour + 2 }} className={cellClassName}>
-                {!occupiedSlot ? (
+                {occupiedSlotCount === 0 ? (
                   <div
                     aria-hidden="true"
                     className="h-full w-full rounded-2xl border border-dashed border-border/50 bg-muted/10"
@@ -232,13 +328,15 @@ export function WeeklyCalendar({
           });
         })}
 
-        {visibleEntries.map((entry) => {
+        {visibleEntries.map((layout) => {
+          const { entry } = layout;
           const dayIndex = dayIndexByKey.get(entry.work_date);
           if (dayIndex === undefined) {
             return null;
           }
 
           const durationHours = getDurationHours(entry);
+
           return (
             <button
               key={entry.id}
@@ -246,13 +344,14 @@ export function WeeklyCalendar({
               style={{
                 gridColumn: dayIndex + 2,
                 gridRow: `${entry.hour_slot + 2} / span ${durationHours}`,
+                ...getEntryLayoutStyle(layout.columnIndex, layout.columnCount),
               }}
               onClick={() => {
                 if (!suppressEntryClickRef.current) {
                   onEntryClick(entry);
                 }
               }}
-              className="relative z-10 m-2 flex min-h-0 flex-col overflow-hidden rounded-2xl border border-white/60 p-3 text-left shadow-sm transition-transform hover:-translate-y-0.5"
+              className="relative z-10 flex min-h-0 flex-col overflow-hidden rounded-2xl border border-white/60 p-3 text-left shadow-sm transition-transform hover:-translate-y-0.5"
             >
               <div
                 className="absolute inset-0 rounded-2xl"

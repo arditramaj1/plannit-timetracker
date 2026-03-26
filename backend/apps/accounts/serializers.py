@@ -3,11 +3,13 @@ from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 User = get_user_model()
+PARALLEL_PROJECT_PERMISSION = "worklogs.can_log_parallel_projects"
 
 
 class UserSerializer(serializers.ModelSerializer):
     role = serializers.SerializerMethodField()
     display_name = serializers.SerializerMethodField()
+    can_log_parallel_projects = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -19,6 +21,7 @@ class UserSerializer(serializers.ModelSerializer):
             "last_name",
             "display_name",
             "role",
+            "can_log_parallel_projects",
             "is_staff",
             "is_superuser",
             "last_login",
@@ -32,6 +35,9 @@ class UserSerializer(serializers.ModelSerializer):
         full_name = f"{obj.first_name} {obj.last_name}".strip()
         return full_name or obj.username
 
+    def get_can_log_parallel_projects(self, obj) -> bool:
+        return obj.has_perm(PARALLEL_PROJECT_PERMISSION)
+
 
 class CompactUserSerializer(UserSerializer):
     class Meta(UserSerializer.Meta):
@@ -41,6 +47,7 @@ class CompactUserSerializer(UserSerializer):
             "email",
             "display_name",
             "role",
+            "can_log_parallel_projects",
             "is_staff",
             "is_superuser",
         )
@@ -55,4 +62,3 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         data = super().validate(attrs)
         data["user"] = CompactUserSerializer(self.user).data
         return data
-

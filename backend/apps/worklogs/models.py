@@ -5,6 +5,16 @@ from django.db import models
 
 from apps.projects.models import Project
 
+PARALLEL_PROJECT_PERMISSION = "worklogs.can_log_parallel_projects"
+
+
+def format_hour_range(start_hour: int, end_hour: int) -> str:
+    return f"{start_hour:02d}:00 to {end_hour:02d}:00"
+
+
+def can_user_log_parallel_projects(user) -> bool:
+    return bool(user and getattr(user, "is_authenticated", False) and user.has_perm(PARALLEL_PROJECT_PERMISSION))
+
 
 class WorkLogEntry(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="work_logs")
@@ -18,11 +28,10 @@ class WorkLogEntry(models.Model):
 
     class Meta:
         ordering = ("work_date", "hour_slot")
+        permissions = (
+            ("can_log_parallel_projects", "Can log overlapping hours across multiple projects"),
+        )
         constraints = [
-            models.UniqueConstraint(
-                fields=("user", "work_date", "hour_slot"),
-                name="unique_worklog_entry_per_user_slot",
-            ),
             models.CheckConstraint(
                 check=models.Q(hour_slot__gte=0) & models.Q(hour_slot__lte=23),
                 name="worklog_hour_slot_range",
@@ -56,22 +65,20 @@ class WorkLogEntry(models.Model):
             raise ValidationError({"duration_minutes": "Work logs must end by 24:00."})
 
         if self.user_id and self.work_date and self.hour_slot is not None:
-            overlapping_entries = (
-                type(self)
-                .objects.filter(user_id=self.user_id, work_date=self.work_date)
-                .exclude(pk=self.pk)
-                .order_by("hour_slot")
+            overlapping_entries = find_overlapping_entries(
+                user=self.user,
+                work_date=self.work_date,
+                hour_slot=self.hour_slot,
+                duration_minutes=self.duration_minutes,
+                exclude_id=self.pk,
             )
-            for existing_entry in overlapping_entries:
-                if self.hour_slot < existing_entry.end_hour_slot and existing_entry.hour_slot < self.end_hour_slot:
-                    raise ValidationError(
-                        {
-                            "hour_slot": (
-                                "This time range overlaps an existing work log from "
-                                f"{existing_entry.hour_slot:02d}:00 to {existing_entry.end_hour_slot:02d}:00."
-                            )
-                        }
-                    )
+            errors = build_overlap_validation_errors(
+                user=self.user,
+                project_id=self.project_id,
+                overlapping_entries=overlapping_entries,
+            )
+            if errors:
+                raise ValidationError(errors)
 
     def save(self, *args, **kwargs):
         self.full_clean()
@@ -82,3 +89,41 @@ class WorkLogEntry(models.Model):
             f"{self.user} | {self.work_date} @ {self.hour_slot:02d}:00"
             f"-{self.end_hour_slot:02d}:00"
         )
+
+
+def find_overlapping_entries(
+    *,
+    user,
+    work_date,
+    hour_slot: int,
+    duration_minutes: int,
+    exclude_id: int | None = None,
+) -> list[WorkLogEntry]:
+    duration_hours = max(1, duration_minutes // 60)
+    end_hour_slot = hour_slot + duration_hours
+    queryset = WorkLogEntry.objects.filter(user=user, work_date=work_date).order_by("hour_slot")
+    if exclude_id is not None:
+        queryset = queryset.exclude(pk=exclude_id)
+
+    overlapping_entries = []
+    for entry in queryset:
+        if hour_slot < entry.end_hour_slot and entry.hour_slot < end_hour_slot:
+            overlapping_entries.append(entry)
+    return overlapping_entries
+
+
+def build_overlap_validation_errors(*, user, project_id: int | None, overlapping_entries: list[WorkLogEntry]):
+    if not overlapping_entries:
+        return None
+
+    if can_user_log_parallel_projects(user):
+        if project_id is not None and any(entry.project_id == project_id for entry in overlapping_entries):
+            return {
+                "project": "Parallel work logs must use different projects for overlapping time ranges."
+            }
+        return None
+
+    formatted_ranges = ", ".join(
+        format_hour_range(entry.hour_slot, entry.end_hour_slot) for entry in overlapping_entries
+    )
+    return {"hour_slot": f"This time range overlaps existing work logs: {formatted_ranges}."}

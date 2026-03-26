@@ -6,6 +6,7 @@ export type User = {
   email: string;
   display_name: string;
   role: Role;
+  can_log_parallel_projects: boolean;
   is_staff: boolean;
   is_superuser: boolean;
 };
@@ -101,4 +102,3 @@ export type ReportFilters = {
   reference_date?: string;
   group_by?: "day" | "week" | "month";
 };
-

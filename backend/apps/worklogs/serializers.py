@@ -1,38 +1,18 @@
+from django.db import transaction
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
 from apps.accounts.serializers import CompactUserSerializer
 from apps.projects.models import Project
 
-from .models import WorkLogEntry
+from .models import (
+    WorkLogEntry,
+    build_overlap_validation_errors,
+    can_user_log_parallel_projects,
+    find_overlapping_entries,
+)
 
 User = get_user_model()
-
-
-def format_hour_range(start_hour: int, end_hour: int) -> str:
-    return f"{start_hour:02d}:00 to {end_hour:02d}:00"
-
-
-def find_overlapping_entries(
-    *,
-    user,
-    work_date,
-    hour_slot: int,
-    duration_minutes: int,
-    exclude_id: int | None = None,
-) -> list[WorkLogEntry]:
-    duration_hours = max(1, duration_minutes // 60)
-    end_hour_slot = hour_slot + duration_hours
-    queryset = WorkLogEntry.objects.filter(user=user, work_date=work_date).order_by("hour_slot")
-    if exclude_id is not None:
-        queryset = queryset.exclude(pk=exclude_id)
-
-    overlapping_entries = []
-    for entry in queryset:
-        if hour_slot < entry.end_hour_slot and entry.hour_slot < end_hour_slot:
-            overlapping_entries.append(entry)
-    return overlapping_entries
-
 
 class WorkLogEntrySerializer(serializers.ModelSerializer):
     user = serializers.PrimaryKeyRelatedField(queryset=User.objects.filter(is_active=True), required=False)
@@ -119,13 +99,13 @@ class WorkLogEntrySerializer(serializers.ModelSerializer):
                 duration_minutes=duration_minutes,
                 exclude_id=instance.pk if instance else None,
             )
-            if overlapping_entries:
-                formatted_ranges = ", ".join(
-                    format_hour_range(entry.hour_slot, entry.end_hour_slot) for entry in overlapping_entries
-                )
-                raise serializers.ValidationError(
-                    {"hour_slot": f"This time range overlaps existing work logs: {formatted_ranges}."}
-                )
+            errors = build_overlap_validation_errors(
+                user=user,
+                project_id=project.id if project else getattr(instance, "project_id", None),
+                overlapping_entries=overlapping_entries,
+            )
+            if errors:
+                raise serializers.ValidationError(errors)
         return attrs
 
     def create(self, validated_data):
@@ -189,12 +169,15 @@ class WorkLogBulkCreateSerializer(serializers.Serializer):
             hour_slot=start_hour,
             duration_minutes=duration_minutes,
         )
-        if overlapping_entries:
-            formatted_ranges = ", ".join(
-                format_hour_range(entry.hour_slot, entry.end_hour_slot) for entry in overlapping_entries
-            )
+        errors = build_overlap_validation_errors(
+            user=user,
+            project_id=attrs["project"].id,
+            overlapping_entries=overlapping_entries,
+        )
+        if errors:
+            field_name, message = next(iter(errors.items()))
             raise serializers.ValidationError(
-                {"hour_slots": f"This time range overlaps existing work logs: {formatted_ranges}."}
+                {"hour_slots" if field_name == "hour_slot" else field_name: message}
             )
         return attrs
 
@@ -207,3 +190,98 @@ class WorkLogBulkCreateSerializer(serializers.Serializer):
             duration_minutes=len(validated_data["hour_slots"]) * 60,
             notes=validated_data.get("notes", ""),
         )
+
+
+class ParallelWorkLogItemSerializer(serializers.Serializer):
+    project = serializers.PrimaryKeyRelatedField(queryset=Project.objects.all())
+    duration_minutes = serializers.IntegerField()
+    notes = serializers.CharField(allow_blank=True, required=False, default="")
+
+    def validate_project(self, value: Project):
+        if not value.is_active:
+            raise serializers.ValidationError("Only active projects can be selected.")
+        return value
+
+    def validate_duration_minutes(self, value: int):
+        if value < 60 or value % 60 != 0:
+            raise serializers.ValidationError("Duration must be in whole-hour increments.")
+        return value
+
+
+class ParallelWorkLogCreateSerializer(serializers.Serializer):
+    user = serializers.PrimaryKeyRelatedField(queryset=User.objects.filter(is_active=True), required=False)
+    work_date = serializers.DateField()
+    hour_slot = serializers.IntegerField(min_value=0, max_value=23)
+    entries = ParallelWorkLogItemSerializer(many=True, min_length=2, max_length=4)
+
+    def validate(self, attrs):
+        request = self.context["request"]
+        is_admin = request.user.is_staff or request.user.is_superuser
+        user = attrs.get("user")
+
+        if not is_admin:
+            user = request.user
+            attrs["user"] = user
+        elif user is None:
+            raise serializers.ValidationError({"user": "Select a user to save these work logs for."})
+
+        if user == request.user and is_admin:
+            raise serializers.ValidationError(
+                {"user": "Admins cannot create or edit work logs for themselves."}
+            )
+
+        if not can_user_log_parallel_projects(user):
+            raise serializers.ValidationError(
+                {"entries": "This user is not allowed to log parallel project hours."}
+            )
+
+        project_ids = [entry["project"].id for entry in attrs["entries"]]
+        if len(set(project_ids)) != len(project_ids):
+            raise serializers.ValidationError(
+                {"entries": "Each parallel work log must use a different project."}
+            )
+
+        start_hour = attrs["hour_slot"]
+        for entry in attrs["entries"]:
+            end_hour = start_hour + (entry["duration_minutes"] // 60)
+            if end_hour > 24:
+                raise serializers.ValidationError(
+                    {"entries": "All parallel work logs must end by 24:00."}
+                )
+
+            overlapping_entries = find_overlapping_entries(
+                user=user,
+                work_date=attrs["work_date"],
+                hour_slot=start_hour,
+                duration_minutes=entry["duration_minutes"],
+            )
+            errors = build_overlap_validation_errors(
+                user=user,
+                project_id=entry["project"].id,
+                overlapping_entries=overlapping_entries,
+            )
+            if errors:
+                field_name, message = next(iter(errors.items()))
+                if field_name == "project":
+                    raise serializers.ValidationError(
+                        {"entries": f"{entry['project'].name}: {message}"}
+                    )
+                raise serializers.ValidationError({"entries": message})
+
+        return attrs
+
+    def create(self, validated_data):
+        entries = validated_data.pop("entries")
+        with transaction.atomic():
+            created_entries = [
+                WorkLogEntry.objects.create(
+                    user=validated_data["user"],
+                    project=entry["project"],
+                    work_date=validated_data["work_date"],
+                    hour_slot=validated_data["hour_slot"],
+                    duration_minutes=entry["duration_minutes"],
+                    notes=entry.get("notes", ""),
+                )
+                for entry in entries
+            ]
+        return created_entries

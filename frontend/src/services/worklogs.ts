@@ -18,6 +18,19 @@ export type WorkLogRangePayload = {
   notes: string;
 };
 
+export type ParallelWorkLogItemPayload = {
+  project: number;
+  duration_minutes: number;
+  notes: string;
+};
+
+export type ParallelWorkLogPayload = {
+  user?: number;
+  work_date: string;
+  hour_slot: number;
+  entries: ParallelWorkLogItemPayload[];
+};
+
 export function listWorkLogs(filters: Record<string, string | number | undefined>) {
   const params = new URLSearchParams();
   Object.entries(filters).forEach(([key, value]) => {
@@ -39,6 +52,13 @@ export function createWorkLog(payload: WorkLogPayload) {
 
 export function createWorkLogRange(payload: WorkLogRangePayload) {
   return apiRequest<WorkLogEntry>("worklogs/bulk-create/", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function createParallelWorkLogs(payload: ParallelWorkLogPayload) {
+  return apiRequest<WorkLogEntry[]>("worklogs/parallel-create/", {
     method: "POST",
     body: JSON.stringify(payload),
   });
