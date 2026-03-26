@@ -4,6 +4,15 @@ import { format } from "date-fns";
 import { Plus } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import {
+  CALENDAR_HOURS,
+  buildEntryLayouts,
+  buildOccupiedSlotMap,
+  formatHourLabel,
+  getDurationHours,
+  getEntryEndHour,
+  type EntryLayout,
+} from "@/lib/calendar-layout";
 import { isToday } from "@/lib/date";
 import { WorkLogEntry } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -23,126 +32,6 @@ type DragSelection = {
   startHour: number;
   endHour: number;
 };
-
-type EntryLayout = {
-  entry: WorkLogEntry;
-  columnIndex: number;
-  columnCount: number;
-  clusterSize: number;
-};
-
-const hours = Array.from({ length: 24 }, (_, hour) => hour);
-
-function formatHourLabel(hour: number) {
-  return `${hour.toString().padStart(2, "0")}:00`;
-}
-
-function getDurationHours(entry: WorkLogEntry) {
-  return Math.max(1, entry.duration_minutes / 60);
-}
-
-function getEntryEndHour(entry: WorkLogEntry) {
-  return entry.hour_slot + getDurationHours(entry);
-}
-
-function buildOccupiedSlotMap(entries: WorkLogEntry[], ignoredEntryId?: number | null) {
-  const occupiedSlotMap = new Map<string, number>();
-
-  entries.forEach((entry) => {
-    if (entry.id === ignoredEntryId) {
-      return;
-    }
-
-    const durationHours = getDurationHours(entry);
-    Array.from({ length: durationHours }, (_, offset) => entry.hour_slot + offset).forEach((hourSlot) => {
-      const key = `${entry.work_date}-${hourSlot}`;
-      occupiedSlotMap.set(key, (occupiedSlotMap.get(key) ?? 0) + 1);
-    });
-  });
-
-  return occupiedSlotMap;
-}
-
-function buildEntryLayouts(entries: WorkLogEntry[], ignoredEntryId?: number | null) {
-  const layouts: EntryLayout[] = [];
-  const entriesByDay = new Map<string, WorkLogEntry[]>();
-
-  entries.forEach((entry) => {
-    if (entry.id === ignoredEntryId) {
-      return;
-    }
-
-    const dayEntries = entriesByDay.get(entry.work_date) ?? [];
-    dayEntries.push(entry);
-    entriesByDay.set(entry.work_date, dayEntries);
-  });
-
-  entriesByDay.forEach((dayEntries) => {
-    const sortedEntries = [...dayEntries].sort(
-      (left, right) =>
-        left.hour_slot - right.hour_slot ||
-        getEntryEndHour(right) - getEntryEndHour(left) ||
-        left.id - right.id,
-    );
-
-    let activeColumns: Array<{ columnIndex: number; endHour: number }> = [];
-    let currentCluster: EntryLayout[] = [];
-    let clusterColumnCount = 1;
-
-    function finalizeCluster() {
-      if (currentCluster.length === 0) {
-        return;
-      }
-
-      currentCluster.forEach((layout) => {
-        layouts.push({
-          ...layout,
-          columnCount: clusterColumnCount,
-          clusterSize: currentCluster.length,
-        });
-      });
-
-      activeColumns = [];
-      currentCluster = [];
-      clusterColumnCount = 1;
-    }
-
-    sortedEntries.forEach((entry) => {
-      activeColumns = activeColumns.filter((item) => item.endHour > entry.hour_slot);
-      if (activeColumns.length === 0 && currentCluster.length > 0) {
-        finalizeCluster();
-      }
-
-      const usedColumns = new Set(activeColumns.map((item) => item.columnIndex));
-      let columnIndex = 0;
-      while (usedColumns.has(columnIndex)) {
-        columnIndex += 1;
-      }
-
-      currentCluster.push({
-        entry,
-        columnIndex,
-        columnCount: 1,
-        clusterSize: 1,
-      });
-      activeColumns.push({
-        columnIndex,
-        endHour: getEntryEndHour(entry),
-      });
-      clusterColumnCount = Math.max(clusterColumnCount, activeColumns.length);
-    });
-
-    finalizeCluster();
-  });
-
-  return layouts.sort(
-    (left, right) =>
-      left.entry.work_date.localeCompare(right.entry.work_date) ||
-      left.entry.hour_slot - right.entry.hour_slot ||
-      left.columnIndex - right.columnIndex ||
-      left.entry.id - right.entry.id,
-  );
-}
 
 function getEntryLayoutStyle(columnIndex: number, columnCount: number) {
   const horizontalInset = 8;
@@ -260,7 +149,7 @@ export function WeeklyCalendar({
           );
         })}
 
-        {hours.map((hour) => (
+        {CALENDAR_HOURS.map((hour) => (
           <div
             key={`hour-${hour}`}
             style={{ gridColumn: 1, gridRow: hour + 2 }}
@@ -274,7 +163,7 @@ export function WeeklyCalendar({
           const dayKey = format(day, "yyyy-MM-dd");
           const isCurrentDay = isToday(day);
 
-          return hours.map((hour) => {
+          return CALENDAR_HOURS.map((hour) => {
             const key = `${dayKey}-${hour}`;
             const occupiedSlotCount = occupiedSlotMap.get(key) ?? 0;
             const selectionActive = isSelected(dayKey, hour);

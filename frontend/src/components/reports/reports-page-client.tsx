@@ -1,12 +1,14 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { endOfMonth, startOfMonth } from "date-fns";
 import { Download } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/hooks/use-auth";
-import { formatApiDate } from "@/lib/date";
+import { formatApiDate, safeParseDate } from "@/lib/date";
+import { buildMonthlyCalendarPdf } from "@/lib/report-calendar-pdf";
 import { ReportFilters } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,8 +18,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PageHeader } from "@/components/layout/page-header";
 import { listProjects } from "@/services/projects";
-import { exportReportCsv, getReport } from "@/services/reports";
+import { getReport } from "@/services/reports";
 import { listUsers } from "@/services/users";
+import { listWorkLogs } from "@/services/worklogs";
 
 function formatHourValue(hours: number) {
   return Number.isInteger(hours) ? String(hours) : hours.toFixed(2);
@@ -32,14 +35,29 @@ function formatTimeRange(hourSlot: number, durationMinutes: number) {
   return `${formatTimeLabel(hourSlot)} - ${formatTimeLabel(endHour)}`;
 }
 
+function downloadBlob(blob: Blob, filename: string) {
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  window.URL.revokeObjectURL(url);
+}
+
+function buildPdfFilename(displayName: string, monthDate: Date) {
+  const sanitizedDisplayName = displayName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return `calendar-report-${sanitizedDisplayName || "user"}-${formatApiDate(monthDate).slice(0, 7)}.pdf`;
+}
+
 export function ReportsPageClient() {
   const { user } = useAuth();
   const today = formatApiDate(new Date());
   const [filters, setFilters] = useState<ReportFilters>({
-    period: "week",
+    period: "month",
     reference_date: today,
     group_by: "week",
   });
+  const [isPdfExporting, setIsPdfExporting] = useState(false);
 
   const usersQuery = useQuery({
     queryKey: ["users"],
@@ -74,12 +92,50 @@ export function ReportsPageClient() {
 
   const report = reportQuery.data;
 
-  async function handleExport() {
+  async function handlePdfExport() {
+    if (!filters.user) {
+      toast.error("Choose a user before exporting a calendar PDF.");
+      return;
+    }
+
+    if (filters.period !== "month") {
+      toast.error("Switch the report period to Month before exporting the calendar PDF.");
+      return;
+    }
+
+    const selectedUser = (usersQuery.data ?? []).find((item) => item.id === filters.user);
+    if (!selectedUser) {
+      toast.error("The selected user could not be found.");
+      return;
+    }
+
+    const referenceDate = safeParseDate(filters.reference_date ?? today);
+    const dateFrom = formatApiDate(startOfMonth(referenceDate));
+    const dateTo = formatApiDate(endOfMonth(referenceDate));
+    const selectedProject = filters.project
+      ? (projectsQuery.data ?? []).find((item) => item.id === filters.project) ?? null
+      : null;
+
     try {
-      await exportReportCsv(filters);
-      toast.success("CSV export started.");
+      setIsPdfExporting(true);
+      const entries = await listWorkLogs({
+        user: filters.user,
+        project: filters.project,
+        date_from: dateFrom,
+        date_to: dateTo,
+      });
+      const pdfBlob = await buildMonthlyCalendarPdf({
+        referenceDate,
+        user: selectedUser,
+        project: selectedProject,
+        entries,
+      });
+      downloadBlob(pdfBlob, buildPdfFilename(selectedUser.display_name, referenceDate));
+      toast.success("PDF export is ready.");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to export the report.");
+      toast.error(error instanceof Error ? error.message : "Unable to export the calendar PDF.");
+    } finally {
+      setIsPdfExporting(false);
     }
   }
 
@@ -88,11 +144,11 @@ export function ReportsPageClient() {
       <PageHeader
         eyebrow="Administration"
         title="Reports"
-        description="Analyze logged hours by user, project, and date range. Filters are already wired for CSV export."
+        description="Analyze logged hours by user, project, and date range. For client handoff, switch to a month, choose one user, and export a PDF made from weekly calendar snapshots."
         actions={
-          <Button variant="outline" onClick={() => void handleExport()}>
+          <Button variant="outline" onClick={() => void handlePdfExport()} disabled={isPdfExporting}>
             <Download className="h-4 w-4" />
-            Export CSV
+            {isPdfExporting ? "Preparing PDF..." : "Export PDF"}
           </Button>
         }
       />

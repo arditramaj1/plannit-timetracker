@@ -220,15 +220,10 @@ export function CalendarPageClient() {
 
       if (dialogState.entry) {
         const parallelEntryMaxEndHour = parallelEntryWindowMap.get(dialogState.entry.id);
-        const nextEndHour =
-          payload.mode === "single"
-            ? (parallelEntryMaxEndHour !== undefined ? dialogState.entry.hour_slot : payload.hourSlot) +
-              payload.durationMinutes / 60
-            : null;
         if (
           parallelEntryMaxEndHour !== undefined &&
           payload.mode === "single" &&
-          nextEndHour > parallelEntryMaxEndHour
+          dialogState.entry.hour_slot + payload.durationMinutes / 60 > parallelEntryMaxEndHour
         ) {
           throw new Error(
             `This parallel work log can only extend until ${formatHourLabel(parallelEntryMaxEndHour)}.`,
