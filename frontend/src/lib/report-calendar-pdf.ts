@@ -144,6 +144,41 @@ function strokeRoundedRect(
   context.restore();
 }
 
+function drawTopRoundedRect(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number,
+) {
+  const limitedRadius = Math.min(radius, width / 2, height);
+  context.beginPath();
+  context.moveTo(x, y + height);
+  context.lineTo(x, y + limitedRadius);
+  context.quadraticCurveTo(x, y, x + limitedRadius, y);
+  context.lineTo(x + width - limitedRadius, y);
+  context.quadraticCurveTo(x + width, y, x + width, y + limitedRadius);
+  context.lineTo(x + width, y + height);
+  context.closePath();
+}
+
+function fillTopRoundedRect(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number,
+  color: string,
+) {
+  context.save();
+  context.fillStyle = color;
+  drawTopRoundedRect(context, x, y, width, height, radius);
+  context.fill();
+  context.restore();
+}
+
 function trimTextToWidth(context: CanvasRenderingContext2D, value: string, maxWidth: number) {
   if (context.measureText(value).width <= maxWidth) {
     return value;
@@ -757,7 +792,7 @@ function renderDetailedWorklogPage(
   const panelWidth = PAGE_PIXEL_WIDTH - PAGE_PADDING * 2;
   const panelHeight = PAGE_PIXEL_HEIGHT - HEADER_HEIGHT - PAGE_PADDING;
   const tableX = panelX;
-  const tableY = panelY + 36;
+  const tableY = panelY;
   const tableWidth = panelWidth;
   const tableHeaderHeight = 44;
 
@@ -809,7 +844,7 @@ function renderDetailedWorklogPage(
   context.font = "600 18px ui-sans-serif, system-ui, sans-serif";
   context.fillText(`${formatHours(totalHours)} hours logged`, metricCardX + 28, metricCardY + 96);
 
-  fillRoundedRect(context, tableX, tableY, tableWidth, tableHeaderHeight, 22, "#0F172A");
+  fillTopRoundedRect(context, tableX, tableY, tableWidth, tableHeaderHeight, 34, "#0F172A");
 
   let headerColumnX = tableX;
   context.font = "700 16px ui-sans-serif, system-ui, sans-serif";
@@ -820,6 +855,13 @@ function renderDetailedWorklogPage(
     context.fillText(column.label, headerColumnX + 12, tableY + tableHeaderHeight / 2);
     headerColumnX += column.width;
   });
+
+  context.strokeStyle = "#D9E2EC";
+  context.lineWidth = 1;
+  context.beginPath();
+  context.moveTo(tableX, tableY + tableHeaderHeight);
+  context.lineTo(tableX + tableWidth, tableY + tableHeaderHeight);
+  context.stroke();
 
   let rowY = tableY + tableHeaderHeight;
   rows.forEach((row, rowIndex) => {
@@ -851,8 +893,6 @@ function renderDetailedWorklogPage(
 
     rowY += row.rowHeight;
   });
-
-  strokeRoundedRect(context, tableX, tableY, tableWidth, rowY - tableY, 22, "#D9E2EC");
 
   context.fillStyle = "#64748B";
   context.textAlign = "right";
