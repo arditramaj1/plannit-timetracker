@@ -49,6 +49,36 @@ function getEntryHourSlots(entry: WorkLogEntry) {
   return buildHourSlots(entry.hour_slot, entry.hour_slot + durationHours - 1);
 }
 
+function getEntryEndHour(entry: WorkLogEntry) {
+  return entry.hour_slot + Math.max(1, entry.duration_minutes / 60);
+}
+
+function buildParallelEntryWindowMap(entries: WorkLogEntry[]) {
+  const entriesByWindow = new Map<string, WorkLogEntry[]>();
+
+  entries.forEach((entry) => {
+    const key = `${entry.work_date}-${entry.hour_slot}`;
+    const groupedEntries = entriesByWindow.get(key) ?? [];
+    groupedEntries.push(entry);
+    entriesByWindow.set(key, groupedEntries);
+  });
+
+  const parallelEntryWindowMap = new Map<number, number>();
+
+  entriesByWindow.forEach((groupedEntries) => {
+    if (groupedEntries.length < 2) {
+      return;
+    }
+
+    const maxEndHour = Math.max(...groupedEntries.map((entry) => getEntryEndHour(entry)));
+    groupedEntries.forEach((entry) => {
+      parallelEntryWindowMap.set(entry.id, maxEndHour);
+    });
+  });
+
+  return parallelEntryWindowMap;
+}
+
 function formatHourLabel(hour: number) {
   return `${hour.toString().padStart(2, "0")}:00`;
 }
@@ -164,6 +194,10 @@ export function CalendarPageClient() {
       }),
   });
 
+  const activeProjects = (projectsQuery.data ?? []).filter((project) => project.is_active);
+  const worklogs = useMemo(() => worklogsQuery.data ?? [], [worklogsQuery.data]);
+  const parallelEntryWindowMap = useMemo(() => buildParallelEntryWindowMap(worklogs), [worklogs]);
+
   function updateVisibleWorkLogs(updater: (entries: WorkLogEntry[]) => WorkLogEntry[]) {
     queryClient.setQueryData<WorkLogEntry[]>(worklogsQueryKey, (current) => updater(current ?? []));
   }
@@ -175,16 +209,35 @@ export function CalendarPageClient() {
       }
 
       if (dialogState.entry) {
+        const parallelEntryMaxEndHour = parallelEntryWindowMap.get(dialogState.entry.id);
+        const nextEndHour =
+          payload.mode === "single"
+            ? (parallelEntryMaxEndHour !== undefined ? dialogState.entry.hour_slot : payload.hourSlot) +
+              payload.durationMinutes / 60
+            : null;
+        if (
+          parallelEntryMaxEndHour !== undefined &&
+          payload.mode === "single" &&
+          nextEndHour > parallelEntryMaxEndHour
+        ) {
+          throw new Error(
+            `This parallel work log can only extend until ${formatHourLabel(parallelEntryMaxEndHour)}.`,
+          );
+        }
+
         return [
           await updateWorkLog(dialogState.entry.id, {
             notes: payload.mode === "single" ? payload.notes : dialogState.entry.notes,
             ...(payload.mode === "single" && payload.project !== dialogState.entry.project
               ? { project: payload.project }
               : {}),
-            ...(payload.mode === "single" && payload.hourSlot !== dialogState.entry.hour_slot
+            ...(payload.mode === "single" &&
+              parallelEntryMaxEndHour === undefined &&
+              payload.hourSlot !== dialogState.entry.hour_slot
               ? { hour_slot: payload.hourSlot }
               : {}),
-            ...(payload.mode === "single" && payload.durationMinutes !== dialogState.entry.duration_minutes
+            ...(payload.mode === "single" &&
+              payload.durationMinutes !== dialogState.entry.duration_minutes
               ? { duration_minutes: payload.durationMinutes }
               : {}),
           }),
@@ -284,8 +337,6 @@ export function CalendarPageClient() {
     },
   });
 
-  const activeProjects = (projectsQuery.data ?? []).filter((project) => project.is_active);
-  const worklogs = worklogsQuery.data ?? [];
   const totalLoggedHours = worklogs.reduce((sum, entry) => sum + entry.duration_minutes, 0) / 60;
   const canSelectRanges = (!isAdmin || Boolean(selectedUser)) && (activeProjects.length > 0 || Boolean(resizeEntry));
 
@@ -343,6 +394,9 @@ export function CalendarPageClient() {
   const isLoading = projectsQuery.isLoading || worklogsQuery.isLoading || (isAdmin && usersQuery.isLoading);
   const hasError = projectsQuery.isError || worklogsQuery.isError || (isAdmin && usersQuery.isError);
   const activeDialogEntry = dialogState?.entry ?? null;
+  const activeDialogEntryParallelMaxEndHour = activeDialogEntry
+    ? parallelEntryWindowMap.get(activeDialogEntry.id) ?? null
+    : null;
 
   return (
     <div className="space-y-6">
@@ -485,7 +539,7 @@ export function CalendarPageClient() {
           await deleteMutation.mutateAsync();
         }}
         onResizeWithCalendar={
-          activeDialogEntry
+          activeDialogEntry && activeDialogEntryParallelMaxEndHour === null
             ? () => {
                 setResizeEntry(activeDialogEntry);
                 setDialogState(null);
@@ -504,6 +558,8 @@ export function CalendarPageClient() {
               }
             : undefined
         }
+        lockStartHour={Boolean(activeDialogEntryParallelMaxEndHour)}
+        maxEndHour={activeDialogEntryParallelMaxEndHour}
       />
     </div>
   );

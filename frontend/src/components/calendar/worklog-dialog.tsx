@@ -64,6 +64,8 @@ type WorklogDialogProps = {
   onDelete: () => Promise<void>;
   onResizeWithCalendar?: () => void;
   onAddParallelProjects?: () => void;
+  lockStartHour?: boolean;
+  maxEndHour?: number | null;
 };
 
 let nextParallelDraftId = 1;
@@ -99,6 +101,8 @@ export function WorklogDialog({
   onDelete,
   onResizeWithCalendar,
   onAddParallelProjects,
+  lockStartHour = false,
+  maxEndHour = null,
 }: WorklogDialogProps) {
   const [project, setProject] = useState("");
   const [notes, setNotes] = useState("");
@@ -108,6 +112,8 @@ export function WorklogDialog({
   const [activeParallelEntryId, setActiveParallelEntryId] = useState<number | null>(null);
 
   const isEditing = Boolean(entry);
+  const parallelEditLimit = isEditing && maxEndHour !== null ? maxEndHour : null;
+  const startHourLocked = isEditing && lockStartHour;
   const canCreateParallel = canLogParallelProjects && !isEditing;
   const sortedHourSlots = useMemo(() => [...hourSlots].sort((left, right) => left - right), [hourSlots]);
   const projectOptions = useMemo(
@@ -234,15 +240,17 @@ export function WorklogDialog({
     return `${format(day, "EEEE, MMM d")} from ${formatHourLabel(startHour)} to ${formatHourLabel(endHour)}`;
   }, [day, endHour, slotCount, startHour]);
 
-  const selectionHint = canCreateParallel
-    ? slotCount > 1
-      ? `This ${slotCount}-hour window can be split across up to four projects. Each project keeps its own notes and duration.`
-      : "This user can log parallel project work here. Add one or more project allocations with separate notes."
-    : slotCount > 1
-      ? isEditing
-        ? `This work log spans ${slotCount} hourly blocks as one shared entry.`
-        : `This will create one work log spanning ${slotCount} hourly blocks with one shared note and project.`
-      : null;
+  const selectionHint = parallelEditLimit
+    ? `This parallel work log keeps its original start time. You can update its project, notes, and end time up to ${formatHourLabel(parallelEditLimit)}.`
+    : canCreateParallel
+      ? slotCount > 1
+        ? `This ${slotCount}-hour window can be split across up to four projects. Each project keeps its own notes and duration.`
+        : "This user can log parallel project work here. Add one or more project allocations with separate notes."
+      : slotCount > 1
+        ? isEditing
+          ? `This work log spans ${slotCount} hourly blocks as one shared entry.`
+          : `This will create one work log spanning ${slotCount} hourly blocks with one shared note and project.`
+        : null;
 
   const canAddMoreProjects = canCreateParallel && parallelEntries.length < Math.min(4, projectOptions.length);
   const hasValidParallelEntries =
@@ -304,13 +312,14 @@ export function WorklogDialog({
               <Label htmlFor="start-hour">Start</Label>
               <Select
                 value={String(startHour)}
+                disabled={startHourLocked}
                 onValueChange={(value) => {
                   const nextStartHour = Number(value);
                   setStartHour(nextStartHour);
                   setEndHour((current) => (current <= nextStartHour ? nextStartHour + 1 : current));
                 }}
               >
-                <SelectTrigger id="start-hour">
+                <SelectTrigger id="start-hour" disabled={startHourLocked}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -325,12 +334,18 @@ export function WorklogDialog({
 
             <div className="space-y-2">
               <Label htmlFor="end-hour">End</Label>
-              <Select value={String(endHour)} onValueChange={(value) => setEndHour(Number(value))}>
+              <Select
+                value={String(endHour)}
+                onValueChange={(value) => setEndHour(Number(value))}
+              >
                 <SelectTrigger id="end-hour">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {Array.from({ length: 24 - startHour }, (_, offset) => startHour + offset + 1).map((hour) => (
+                  {Array.from(
+                    { length: (parallelEditLimit ?? 24) - startHour },
+                    (_, offset) => startHour + offset + 1,
+                  ).map((hour) => (
                     <SelectItem key={hour} value={String(hour)}>
                       {formatHourLabel(hour)}
                     </SelectItem>
