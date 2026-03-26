@@ -372,8 +372,8 @@ export function WeeklyCalendar({
               <div
                 className="absolute inset-0 rounded-2xl"
                 style={{
-                  backgroundColor: `${entry.project_color}18`,
-                  boxShadow: `inset 4px 0 0 ${entry.project_color}`,
+                  backgroundColor: `${entry.project_color}`,
+                  boxShadow: `inset 4px 0 0 #00000060`,
                 }}
               />
               {isParallelEntry ? (
@@ -399,12 +399,12 @@ export function WeeklyCalendar({
                       {durationHours}h
                     </span>
                   </div>
-                  <div className="mt-3 flex flex-wrap gap-1.5">
+                  <div className="mt-1 flex flex-wrap gap-1.5">
                     <span className="rounded-full bg-white/80 px-2 py-1 text-[11px] font-medium text-slate-600">
                       {formatHourLabel(entry.hour_slot)} to {formatHourLabel(entry.hour_slot + durationHours)}
                     </span>
                   </div>
-                  <p className="mt-2 line-clamp-2 text-xs leading-5 text-slate-700">
+                  <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-700">
                     {entry.notes || "No notes added"}
                   </p>
                 </div>
