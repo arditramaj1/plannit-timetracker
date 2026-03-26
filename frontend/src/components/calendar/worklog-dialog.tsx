@@ -156,7 +156,7 @@ export function WorklogDialog({
   }, [entry, initialEndHour, initialStartHour, open, projectOptions]);
 
   useEffect(() => {
-    if (!open || !canCreateParallel || slotCount <= 0) {
+    if (!open || !canCreateParallel || slotCount <= 0 || parallelEntries.length === 0) {
       return;
     }
 
@@ -166,7 +166,7 @@ export function WorklogDialog({
         durationHours: Math.min(Math.max(draft.durationHours, 1), slotCount),
       })),
     );
-  }, [canCreateParallel, open, slotCount]);
+  }, [canCreateParallel, open, parallelEntries.length, slotCount]);
 
   useEffect(() => {
     if (parallelEntries.length === 0) {
@@ -275,7 +275,9 @@ export function WorklogDialog({
   function handleAddParallelEntry() {
     setParallelEntries((current) => [
       ...current,
-      createParallelEntryDraft(getNextAvailableParallelSlotNumber(current)),
+      createParallelEntryDraft(getNextAvailableParallelSlotNumber(current), {
+        durationHours: Math.max(1, slotCount),
+      }),
     ]);
   }
 

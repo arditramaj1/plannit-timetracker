@@ -336,6 +336,18 @@ export function WeeklyCalendar({
           }
 
           const durationHours = getDurationHours(entry);
+          const isParallelEntry = layout.clusterSize > 1 || layout.columnCount > 1;
+          const parallelLabel = entry.project_code ?? entry.project_name;
+          const entryTitle = isParallelEntry
+            ? [
+                entry.project_code ? `${entry.project_code} - ${entry.project_name}` : entry.project_name,
+                `${formatHourLabel(entry.hour_slot)} to ${formatHourLabel(entry.hour_slot + durationHours)}`,
+              ].join("\n")
+            : [
+                entry.project_name,
+                `${formatHourLabel(entry.hour_slot)} to ${formatHourLabel(entry.hour_slot + durationHours)}`,
+                entry.notes.trim() || "No notes added",
+              ].join("\n");
 
           return (
             <button
@@ -351,7 +363,11 @@ export function WeeklyCalendar({
                   onEntryClick(entry);
                 }
               }}
-              className="relative z-10 flex min-h-0 flex-col overflow-hidden rounded-2xl border border-white/60 p-3 text-left shadow-sm transition-transform hover:-translate-y-0.5"
+              title={entryTitle}
+              className={cn(
+                "relative z-10 flex min-h-0 flex-col overflow-hidden rounded-2xl border border-white/60 text-left shadow-sm transition-transform hover:-translate-y-0.5",
+                isParallelEntry ? "p-2.5" : "p-3",
+              )}
             >
               <div
                 className="absolute inset-0 rounded-2xl"
@@ -360,20 +376,39 @@ export function WeeklyCalendar({
                   boxShadow: `inset 4px 0 0 ${entry.project_color}`,
                 }}
               />
-              <div className="relative flex h-full flex-col">
-                <div className="flex items-start justify-between gap-3">
-                  <p className="truncate text-sm font-semibold text-slate-950">{entry.project_name}</p>
-                  <span className="rounded-full bg-white/80 px-2 py-1 text-[11px] font-semibold text-slate-700">
-                    {durationHours}h
-                  </span>
+              {isParallelEntry ? (
+                <div className="relative flex h-full min-h-0 flex-col">
+                  <div className="flex items-start justify-center">
+                    <span className="rounded-full bg-white/85 px-2 py-1 text-[10px] font-semibold text-slate-700">
+                      {durationHours}h
+                    </span>
+                  </div>
+                  <div className="flex flex-1 items-center justify-center px-1">
+                    <p className="w-full break-words text-center text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-950">
+                      {parallelLabel}
+                    </p>
+                  </div>
                 </div>
-                <p className="mt-2 text-xs font-medium text-slate-600">
-                  {formatHourLabel(entry.hour_slot)} to {formatHourLabel(entry.hour_slot + durationHours)}
-                </p>
-                <p className="mt-2 line-clamp-2 text-xs leading-5 text-slate-700">
-                  {entry.notes || "No notes added"}
-                </p>
-              </div>
+              ) : (
+                <div className="relative flex h-full min-h-0 flex-col">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-slate-950">{entry.project_name}</p>
+                    </div>
+                    <span className="shrink-0 rounded-full bg-white/85 px-2 py-1 text-[11px] font-semibold text-slate-700">
+                      {durationHours}h
+                    </span>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    <span className="rounded-full bg-white/80 px-2 py-1 text-[11px] font-medium text-slate-600">
+                      {formatHourLabel(entry.hour_slot)} to {formatHourLabel(entry.hour_slot + durationHours)}
+                    </span>
+                  </div>
+                  <p className="mt-2 line-clamp-2 text-xs leading-5 text-slate-700">
+                    {entry.notes || "No notes added"}
+                  </p>
+                </div>
+              )}
             </button>
           );
         })}

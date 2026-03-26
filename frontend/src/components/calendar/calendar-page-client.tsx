@@ -407,6 +407,14 @@ export function CalendarPageClient() {
   const activeDialogEntryParallelMaxEndHour = activeDialogEntry
     ? parallelEntryWindowMap.get(activeDialogEntry.id) ?? null
     : null;
+  const dialogKey = dialogState
+    ? [
+        dialogState.entry?.id ?? "new",
+        formatApiDate(dialogState.day),
+        dialogState.hourSlots.join(","),
+        (dialogState.blockedProjectIds ?? []).join(","),
+      ].join(":")
+    : "closed";
 
   return (
     <div className="space-y-6">
@@ -528,6 +536,7 @@ export function CalendarPageClient() {
       </Card>
 
       <WorklogDialog
+        key={dialogKey}
         open={Boolean(dialogState)}
         onOpenChange={(open) => {
           if (!open) {

@@ -18,6 +18,7 @@ class WorkLogEntrySerializer(serializers.ModelSerializer):
     user = serializers.PrimaryKeyRelatedField(queryset=User.objects.filter(is_active=True), required=False)
     duration_minutes = serializers.IntegerField(required=False)
     user_detail = CompactUserSerializer(source="user", read_only=True)
+    project_code = serializers.CharField(source="project.code", read_only=True)
     project_name = serializers.CharField(source="project.name", read_only=True)
     project_color = serializers.CharField(source="project.color_hex", read_only=True)
 
@@ -28,6 +29,7 @@ class WorkLogEntrySerializer(serializers.ModelSerializer):
             "user",
             "user_detail",
             "project",
+            "project_code",
             "project_name",
             "project_color",
             "work_date",

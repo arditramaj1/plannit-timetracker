@@ -27,6 +27,7 @@ export type WorkLogEntry = {
   user?: number;
   user_detail: User;
   project: number;
+  project_code?: string;
   project_name: string;
   project_color: string;
   work_date: string;
