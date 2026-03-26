@@ -1,15 +1,16 @@
 import { clearStoredAuth, getStoredAuth, setStoredAuth } from "@/lib/auth-storage";
 import { AuthPayload, User } from "@/lib/types";
 
-const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1").replace(
-  /\/$/,
-  "",
-);
+// Route browser API traffic through Next.js so the backend can stay on the internal container network.
+const API_BASE_URL = "/api/backend";
 
 let refreshPromise: Promise<AuthPayload | null> | null = null;
 
 function getUrl(path: string) {
-  return `${API_BASE_URL}/${path.replace(/^\//, "")}`;
+  const [pathname, search = ""] = path.split("?");
+  const normalizedPath = pathname.replace(/^\/+|\/+$/g, "");
+
+  return `${API_BASE_URL}/${normalizedPath}${search ? `?${search}` : ""}`;
 }
 
 async function parseError(response: Response) {
