@@ -1,4 +1,7 @@
+from django.db.models import ProtectedError
+from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
 from apps.common.permissions import IsAdminOrReadOnly
@@ -25,3 +28,15 @@ class ProjectViewSet(ModelViewSet):
             return [IsAuthenticated()]
         return super().get_permissions()
 
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        try:
+            self.perform_destroy(instance)
+        except ProtectedError:
+            return Response(
+                {
+                    "detail": "This project cannot be deleted because it already has work logs. Deactivate it instead."
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        return Response(status=status.HTTP_204_NO_CONTENT)
