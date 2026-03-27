@@ -466,10 +466,21 @@ function drawCompactCalendarEntry(
   const centerX = entryX + entryWidth / 2;
   const safeWidth = Math.max(24, entryWidth - 16);
   const normalizedLabel = label.toUpperCase();
+  const compactDurationLabel = `${normalizedLabel} ${durationHours}h`;
 
   context.save();
   context.fillStyle = textColor;
   context.textAlign = "center";
+
+  if (durationHours > 1) {
+    const compactFontSize = entryHeight < 40 || entryWidth < 120 ? 11 : entryHeight < 60 ? 12 : 14;
+    context.textBaseline = "middle";
+    context.font = `700 ${compactFontSize}px ui-sans-serif, system-ui, sans-serif`;
+    const singleLine = trimTextToWidth(context, compactDurationLabel, safeWidth);
+    context.fillText(singleLine, centerX, entryY + entryHeight / 2 + 0.5);
+    context.restore();
+    return;
+  }
 
   if (entryHeight < 34) {
     context.textBaseline = "middle";
@@ -693,7 +704,7 @@ function renderWeeklyCalendarPage(
     const durationHours = getDurationHours(layout.entry);
     const columnGap = 10;
     const horizontalInset = 12;
-    const verticalInset = durationHours <= 1 ? 3 : 8;
+    const verticalInset = 3;
     const totalGap = Math.max(0, layout.columnCount - 1) * columnGap;
     const entryWidth =
       (dayColumnWidth - horizontalInset * 2 - totalGap) / Math.max(1, layout.columnCount);
@@ -722,7 +733,7 @@ function renderWeeklyCalendarPage(
     fillRoundedRect(context, entryX + accentInset, entryY + accentInset, 10, accentHeight, 5, accentColor);
     strokeRoundedRect(context, entryX, entryY, entryWidth, entryHeight, 22, withAlpha("#FFFFFF", 0.42), 2);
 
-    if (isCompact) {
+    if (isCompact || durationHours > 1) {
       drawCompactCalendarEntry(context, {
         entryX,
         entryY,
