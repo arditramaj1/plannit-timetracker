@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { endOfMonth, startOfMonth } from "date-fns";
 import { Download } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/hooks/use-auth";
@@ -11,7 +11,7 @@ import { formatApiDate, safeParseDate } from "@/lib/date";
 import { buildMonthlyCalendarPdf } from "@/lib/report-calendar-pdf";
 import { ReportFilters } from "@/lib/types";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -49,6 +49,8 @@ function buildPdfFilename(displayName: string, monthDate: Date) {
   return `calendar-report-${sanitizedDisplayName || "user"}-${formatApiDate(monthDate).slice(0, 7)}.pdf`;
 }
 
+const DETAIL_PAGE_SIZE_OPTIONS = [10, 25, 50];
+
 export function ReportsPageClient() {
   const { user } = useAuth();
   const today = formatApiDate(new Date());
@@ -58,6 +60,8 @@ export function ReportsPageClient() {
     group_by: "week",
   });
   const [isPdfExporting, setIsPdfExporting] = useState(false);
+  const [detailPage, setDetailPage] = useState(1);
+  const [detailRowsPerPage, setDetailRowsPerPage] = useState(25);
 
   const usersQuery = useQuery({
     queryKey: ["users"],
@@ -77,6 +81,21 @@ export function ReportsPageClient() {
     enabled: user?.role === "admin",
   });
 
+  const report = reportQuery.data;
+  const detailRows = report?.details ?? [];
+  const totalDetailPages = Math.max(1, Math.ceil(detailRows.length / detailRowsPerPage));
+  const detailStartIndex = detailRows.length === 0 ? 0 : (detailPage - 1) * detailRowsPerPage;
+  const detailEndIndex = Math.min(detailStartIndex + detailRowsPerPage, detailRows.length);
+  const paginatedDetailRows = detailRows.slice(detailStartIndex, detailEndIndex);
+
+  useEffect(() => {
+    setDetailPage(1);
+  }, [filters]);
+
+  useEffect(() => {
+    setDetailPage((current) => Math.min(current, totalDetailPages));
+  }, [totalDetailPages]);
+
   if (user?.role !== "admin") {
     return (
       <Card>
@@ -89,8 +108,6 @@ export function ReportsPageClient() {
       </Card>
     );
   }
-
-  const report = reportQuery.data;
 
   async function handlePdfExport() {
     if (!filters.user) {
@@ -346,8 +363,38 @@ export function ReportsPageClient() {
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle>Detailed work logs</CardTitle>
+        <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div className="space-y-1">
+            <CardTitle>Detailed work logs</CardTitle>
+            <CardDescription>
+              {detailRows.length > 0
+                ? `Showing ${detailStartIndex + 1}-${detailEndIndex} of ${detailRows.length} entries`
+                : "Review each work log entry for the selected filters."}
+            </CardDescription>
+          </div>
+          {detailRows.length > 0 ? (
+            <div className="w-full space-y-2 sm:w-40">
+              <Label htmlFor="detail_rows_per_page">Rows per page</Label>
+              <Select
+                value={String(detailRowsPerPage)}
+                onValueChange={(value) => {
+                  setDetailRowsPerPage(Number(value));
+                  setDetailPage(1);
+                }}
+              >
+                <SelectTrigger id="detail_rows_per_page">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {DETAIL_PAGE_SIZE_OPTIONS.map((option) => (
+                    <SelectItem key={option} value={String(option)}>
+                      {option}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : null}
         </CardHeader>
         <CardContent className="p-0">
           <Table>
@@ -362,8 +409,8 @@ export function ReportsPageClient() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {(report?.details ?? []).length > 0 ? (
-                report?.details.map((row) => (
+              {detailRows.length > 0 ? (
+                paginatedDetailRows.map((row) => (
                   <TableRow key={row.id}>
                     <TableCell>{row.user.display_name}</TableCell>
                     <TableCell>{row.project.name}</TableCell>
@@ -385,6 +432,31 @@ export function ReportsPageClient() {
             </TableBody>
           </Table>
         </CardContent>
+        {detailRows.length > 0 ? (
+          <CardFooter className="flex flex-col gap-3 border-t border-border/70 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-muted-foreground">
+              Page {detailPage} of {totalDetailPages}
+            </p>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setDetailPage((current) => Math.max(1, current - 1))}
+                disabled={detailPage === 1}
+              >
+                Previous
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setDetailPage((current) => Math.min(totalDetailPages, current + 1))}
+                disabled={detailPage === totalDetailPages}
+              >
+                Next
+              </Button>
+            </div>
+          </CardFooter>
+        ) : null}
       </Card>
     </div>
   );
