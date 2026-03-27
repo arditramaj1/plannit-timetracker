@@ -205,6 +205,12 @@ uv run python manage.py migrate --noinput
 uv run python manage.py seed_demo_data || true
 ```
 
+Optional seed controls:
+
+- `DJANGO_SEED_DEMO_DATA=1` enables automatic seeding on container startup.
+- `DJANGO_SEED_REGULAR_USER=0` skips creating the `alex` demo user and sample work logs, but still creates the demo projects.
+- `DJANGO_SEED_SUPERUSER_ONLY=1` creates only the Django superuser and overrides `DJANGO_SEED_REGULAR_USER`.
+
 Start the backend locally:
 
 ```bash
@@ -234,7 +240,7 @@ Application URLs:
 Seeded credentials:
 
 - Admin: `admin / admin123`
-- Regular user: `alex / demo123`
+- Regular user: `alex / demo123` when `DJANGO_SEED_REGULAR_USER=1` and `DJANGO_SEED_SUPERUSER_ONLY=0`
 
 ## Production Notes
 

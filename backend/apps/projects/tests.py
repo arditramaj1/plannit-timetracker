@@ -1,6 +1,9 @@
+import os
 from datetime import date
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.core.management import call_command
 from django.test import TestCase
 from django.urls import reverse
 from rest_framework.test import APIClient
@@ -11,6 +14,53 @@ from apps.projects.serializers import ProjectSerializer
 from apps.worklogs.models import WorkLogEntry
 
 User = get_user_model()
+
+
+class SeedDemoDataCommandTests(TestCase):
+    def run_seed_command(self, **env_overrides):
+        environment = {
+            "DJANGO_SUPERUSER_USERNAME": "admin",
+            "DJANGO_SUPERUSER_EMAIL": "admin@example.com",
+            "DJANGO_SUPERUSER_PASSWORD": "admin123",
+            "DJANGO_SEED_REGULAR_USER": "",
+            "DJANGO_SEED_SUPERUSER_ONLY": "",
+        }
+        environment.update(env_overrides)
+
+        with patch.dict(os.environ, environment, clear=False):
+            call_command("seed_demo_data")
+
+    def test_default_seed_creates_superuser_demo_user_projects_and_worklogs(self):
+        self.run_seed_command()
+
+        admin = User.objects.get(username="admin")
+        demo_user = User.objects.get(username="alex")
+
+        self.assertTrue(admin.is_staff)
+        self.assertTrue(admin.is_superuser)
+        self.assertTrue(demo_user.has_perm("worklogs.can_log_parallel_projects"))
+        self.assertEqual(Project.objects.count(), 3)
+        self.assertEqual(WorkLogEntry.objects.filter(user=demo_user).count(), 6)
+
+    def test_seed_can_skip_regular_user_but_keep_demo_projects(self):
+        self.run_seed_command(DJANGO_SEED_REGULAR_USER="0")
+
+        admin = User.objects.get(username="admin")
+
+        self.assertTrue(admin.is_superuser)
+        self.assertFalse(User.objects.filter(username="alex").exists())
+        self.assertEqual(Project.objects.count(), 3)
+        self.assertEqual(WorkLogEntry.objects.count(), 0)
+
+    def test_superuser_only_overrides_regular_user_seeding(self):
+        self.run_seed_command(DJANGO_SEED_SUPERUSER_ONLY="1", DJANGO_SEED_REGULAR_USER="1")
+
+        admin = User.objects.get(username="admin")
+
+        self.assertTrue(admin.is_superuser)
+        self.assertFalse(User.objects.filter(username="alex").exists())
+        self.assertEqual(Project.objects.count(), 0)
+        self.assertEqual(WorkLogEntry.objects.count(), 0)
 
 
 class ProjectSerializerTests(TestCase):

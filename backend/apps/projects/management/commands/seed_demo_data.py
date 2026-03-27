@@ -10,14 +10,37 @@ from apps.worklogs.models import WorkLogEntry
 
 User = get_user_model()
 
+TRUTHY_ENV_VALUES = {"1", "true", "yes", "on"}
+FALSY_ENV_VALUES = {"0", "false", "no", "off"}
+
 
 class Command(BaseCommand):
-    help = "Seed an admin user, a demo user, projects, and sample work logs."
+    help = "Seed the Django superuser and optional demo projects, user, and sample work logs."
+
+    def get_bool_env(self, name: str, default: bool) -> bool:
+        raw_value = os.getenv(name)
+        if raw_value is None or raw_value.strip() == "":
+            return default
+
+        normalized_value = raw_value.strip().lower()
+        if normalized_value in TRUTHY_ENV_VALUES:
+            return True
+        if normalized_value in FALSY_ENV_VALUES:
+            return False
+
+        self.stderr.write(
+            self.style.WARNING(
+                f"{name}={raw_value!r} is not a supported boolean value. Falling back to {int(default)}."
+            )
+        )
+        return default
 
     def handle(self, *args, **options):
         admin_username = os.getenv("DJANGO_SUPERUSER_USERNAME", "admin")
         admin_email = os.getenv("DJANGO_SUPERUSER_EMAIL", "admin@example.com")
         admin_password = os.getenv("DJANGO_SUPERUSER_PASSWORD", "admin123")
+        seed_superuser_only = self.get_bool_env("DJANGO_SEED_SUPERUSER_ONLY", False)
+        seed_regular_user = False if seed_superuser_only else self.get_bool_env("DJANGO_SEED_REGULAR_USER", True)
 
         demo_username = "alex"
         demo_email = "alex@example.com"
@@ -38,6 +61,27 @@ class Command(BaseCommand):
         admin.email = admin_email
         admin.save()
 
+        if seed_superuser_only:
+            self.stdout.write(self.style.SUCCESS("Seed data is ready. Created or updated the Django superuser only."))
+            return
+
+        projects = [
+            {"code": "OPS", "name": "Operations", "color_hex": "#0F766E"},
+            {"code": "PLN", "name": "Product Planning", "color_hex": "#0EA5E9"},
+            {"code": "ENG", "name": "Platform Engineering", "color_hex": "#EA580C"},
+        ]
+
+        for project_data in projects:
+            Project.objects.update_or_create(code=project_data["code"], defaults=project_data)
+
+        if not seed_regular_user:
+            self.stdout.write(
+                self.style.SUCCESS(
+                    "Seed data is ready. Created or updated the Django superuser and demo projects."
+                )
+            )
+            return
+
         demo_user, demo_created = User.objects.get_or_create(
             username=demo_username,
             defaults={
@@ -52,15 +96,6 @@ class Command(BaseCommand):
         parallel_permission = Permission.objects.filter(codename="can_log_parallel_projects").first()
         if parallel_permission is not None:
             demo_user.user_permissions.add(parallel_permission)
-
-        projects = [
-            {"code": "OPS", "name": "Operations", "color_hex": "#0F766E"},
-            {"code": "PLN", "name": "Product Planning", "color_hex": "#0EA5E9"},
-            {"code": "ENG", "name": "Platform Engineering", "color_hex": "#EA580C"},
-        ]
-
-        for project_data in projects:
-            Project.objects.update_or_create(code=project_data["code"], defaults=project_data)
 
         week_start = date.today() - timedelta(days=date.today().weekday())
         demo_entries = [
@@ -82,4 +117,8 @@ class Command(BaseCommand):
                 defaults={"notes": notes},
             )
 
-        self.stdout.write(self.style.SUCCESS("Demo data is ready."))
+        self.stdout.write(
+            self.style.SUCCESS(
+                "Seed data is ready. Created or updated the Django superuser, demo projects, demo user, and sample work logs."
+            )
+        )
