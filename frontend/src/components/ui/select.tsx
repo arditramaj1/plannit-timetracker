@@ -23,16 +23,35 @@ const SelectTrigger = ({ className, children, ...props }: SelectPrimitive.Select
   </SelectPrimitive.Trigger>
 );
 
-const SelectContent = ({ className, children, ...props }: SelectPrimitive.SelectContentProps) => (
+const SelectContent = ({
+  className,
+  children,
+  position = "popper",
+  sideOffset = 6,
+  ...props
+}: SelectPrimitive.SelectContentProps) => (
   <SelectPrimitive.Portal>
     <SelectPrimitive.Content
-      className={cn("z-50 overflow-hidden rounded-md border border-border bg-white shadow-surface", className)}
+      position={position}
+      sideOffset={sideOffset}
+      className={cn(
+        "relative z-50 max-h-72 min-w-[8rem] overflow-hidden rounded-md border border-border bg-white shadow-surface",
+        position === "popper" ? "min-w-[var(--radix-select-trigger-width)]" : null,
+        className,
+      )}
       {...props}
     >
       <SelectPrimitive.ScrollUpButton className="flex items-center justify-center py-1">
         <ChevronUp className="h-4 w-4" />
       </SelectPrimitive.ScrollUpButton>
-      <SelectPrimitive.Viewport className="p-1">{children}</SelectPrimitive.Viewport>
+      <SelectPrimitive.Viewport
+        className={cn(
+          "p-1",
+          position === "popper" ? "w-full min-w-[var(--radix-select-trigger-width)]" : null,
+        )}
+      >
+        {children}
+      </SelectPrimitive.Viewport>
       <SelectPrimitive.ScrollDownButton className="flex items-center justify-center py-1">
         <ChevronDown className="h-4 w-4" />
       </SelectPrimitive.ScrollDownButton>
@@ -58,4 +77,3 @@ const SelectItem = ({ className, children, ...props }: SelectPrimitive.SelectIte
 );
 
 export { Select, SelectContent, SelectItem, SelectTrigger, SelectValue };
-
