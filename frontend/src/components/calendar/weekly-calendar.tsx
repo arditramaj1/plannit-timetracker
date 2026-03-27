@@ -31,7 +31,11 @@ type DragSelection = {
   dayKey: string;
   startHour: number;
   endHour: number;
+  segment: "daytime" | "overnight";
 };
+
+const CALENDAR_DAY_START_HOUR = 7;
+const DISPLAY_HOURS = [...CALENDAR_HOURS.slice(CALENDAR_DAY_START_HOUR), ...CALENDAR_HOURS.slice(0, CALENDAR_DAY_START_HOUR)];
 
 function getEntryLayoutStyle(columnIndex: number, columnCount: number) {
   const horizontalInset = 8;
@@ -52,6 +56,14 @@ function getRangeBounds(selection: DragSelection) {
     startHour: Math.min(selection.startHour, selection.endHour),
     endHour: Math.max(selection.startHour, selection.endHour),
   };
+}
+
+function getHourSegment(hourSlot: number) {
+  return hourSlot >= CALENDAR_DAY_START_HOUR ? "daytime" : "overnight";
+}
+
+function getGridRowForHour(hourSlot: number) {
+  return ((hourSlot - CALENDAR_DAY_START_HOUR + CALENDAR_HOURS.length) % CALENDAR_HOURS.length) + 2;
 }
 
 export function WeeklyCalendar({
@@ -103,12 +115,13 @@ export function WeeklyCalendar({
       dayKey,
       startHour: hourSlot,
       endHour: hourSlot,
+      segment: getHourSegment(hourSlot),
     });
   }
 
   function updateSelection(dayKey: string, hourSlot: number) {
     setDragSelection((current) => {
-      if (!current || current.dayKey !== dayKey) {
+      if (!current || current.dayKey !== dayKey || current.segment !== getHourSegment(hourSlot)) {
         return current;
       }
       return { ...current, endHour: hourSlot };
@@ -149,10 +162,10 @@ export function WeeklyCalendar({
           );
         })}
 
-        {CALENDAR_HOURS.map((hour) => (
+        {DISPLAY_HOURS.map((hour, displayIndex) => (
           <div
             key={`hour-${hour}`}
-            style={{ gridColumn: 1, gridRow: hour + 2 }}
+            style={{ gridColumn: 1, gridRow: displayIndex + 2 }}
             className="border-r border-t border-border/80 bg-muted/20 px-4 py-6 text-sm font-medium text-muted-foreground"
           >
             {formatHourLabel(hour)}
@@ -163,7 +176,7 @@ export function WeeklyCalendar({
           const dayKey = format(day, "yyyy-MM-dd");
           const isCurrentDay = isToday(day);
 
-          return CALENDAR_HOURS.map((hour) => {
+          return DISPLAY_HOURS.map((hour, displayIndex) => {
             const key = `${dayKey}-${hour}`;
             const occupiedSlotCount = occupiedSlotMap.get(key) ?? 0;
             const selectionActive = isSelected(dayKey, hour);
@@ -179,7 +192,7 @@ export function WeeklyCalendar({
                 <button
                   key={key}
                   type="button"
-                  style={{ gridColumn: dayIndex + 2, gridRow: hour + 2 }}
+                  style={{ gridColumn: dayIndex + 2, gridRow: displayIndex + 2 }}
                   onPointerDown={(event) => {
                     event.preventDefault();
                     startSelection(day, hour, dayKey);
@@ -205,7 +218,7 @@ export function WeeklyCalendar({
             }
 
             return (
-              <div key={key} style={{ gridColumn: dayIndex + 2, gridRow: hour + 2 }} className={cellClassName}>
+              <div key={key} style={{ gridColumn: dayIndex + 2, gridRow: displayIndex + 2 }} className={cellClassName}>
                 {occupiedSlotCount === 0 ? (
                   <div
                     aria-hidden="true"
@@ -244,7 +257,7 @@ export function WeeklyCalendar({
               type="button"
               style={{
                 gridColumn: dayIndex + 2,
-                gridRow: `${entry.hour_slot + 2} / span ${durationHours}`,
+                gridRow: `${getGridRowForHour(entry.hour_slot)} / span ${durationHours}`,
                 ...getEntryLayoutStyle(layout.columnIndex, layout.columnCount),
               }}
               onClick={() => {
