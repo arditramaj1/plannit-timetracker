@@ -171,7 +171,7 @@ export function ReportsPageClient() {
       />
 
       <Card>
-        <CardContent className="grid gap-4 p-6 lg:grid-cols-6">
+        <CardContent className="grid gap-4 p-6 lg:grid-cols-7">
           <div className="space-y-2 lg:col-span-1">
             <Label>Period</Label>
             <Select
@@ -244,7 +244,7 @@ export function ReportsPageClient() {
             </Select>
           </div>
 
-          <div className="space-y-2 lg:col-span-1">
+          <div className="space-y-2 lg:col-span-2">
             <Label>Project</Label>
             <Select
               value={filters.project ? String(filters.project) : "all"}
@@ -252,7 +252,7 @@ export function ReportsPageClient() {
                 setFilters((current) => ({ ...current, project: value === "all" ? undefined : Number(value) }))
               }
             >
-              <SelectTrigger>
+              <SelectTrigger className="[&>span]:truncate">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
