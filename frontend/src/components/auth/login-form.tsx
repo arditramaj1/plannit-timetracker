@@ -14,8 +14,8 @@ import { Label } from "@/components/ui/label";
 export function LoginForm() {
   const router = useRouter();
   const { user, isInitialized, isLoading, login } = useAuth();
-  const [username, setUsername] = useState("alex");
-  const [password, setPassword] = useState("demo123");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
 
   useEffect(() => {
     if (isInitialized && user) {
@@ -41,9 +41,7 @@ export function LoginForm() {
         </div>
         <div className="space-y-1">
           <CardTitle>Welcome back</CardTitle>
-          <CardDescription>
-            Sign in to manage your weekly work logs. Demo accounts are prefilled for quick access.
-          </CardDescription>
+          <CardDescription>Sign in to manage your weekly work logs.</CardDescription>
         </div>
       </CardHeader>
       <CardContent>
@@ -56,30 +54,29 @@ export function LoginForm() {
                 id="username"
                 value={username}
                 onChange={(event) => setUsername(event.target.value)}
-                placeholder="alex"
+                placeholder="Enter your username"
                 className="pl-10"
               />
             </div>
           </div>
           <div className="space-y-2">
             <Label htmlFor="password">Password</Label>
-            <Input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              placeholder="demo123"
-            />
+            <div className="relative">
+              <LockKeyhole className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder="Enter your password"
+                className="pl-10"
+              />
+            </div>
           </div>
           <Button className="w-full" type="submit" disabled={isLoading}>
             {isLoading ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
             Sign In
           </Button>
-          <div className="rounded-xl bg-secondary p-3 text-xs text-secondary-foreground">
-            Demo user: <span className="font-semibold">alex / demo123</span>
-            <br />
-            Demo admin: <span className="font-semibold">admin / admin123</span>
-          </div>
         </form>
       </CardContent>
     </Card>
